@@ -1,0 +1,236 @@
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { loadConfig } from '../config.js';
+import type {
+  MulticaWorkspace,
+  MulticaAgent,
+  MulticaRuntime,
+  MulticaProject,
+  MulticaLabel,
+  MulticaAutopilot,
+  MulticaAutopilotDetail,
+} from '../types/multica.js';
+
+const exec = promisify(execFile);
+
+interface ExecOptions {
+  env?: Record<string, string>;
+}
+
+let multicaPath: string | null = null;
+
+async function resolveMulticaPath(): Promise<string> {
+  if (multicaPath) return multicaPath;
+  const { stdout } = await exec('which', ['multica']);
+  multicaPath = stdout.trim();
+  return multicaPath;
+}
+
+function buildEnv(workspaceId?: string): Record<string, string> {
+  const env: Record<string, string> = { ...process.env } as Record<string, string>;
+  if (workspaceId) {
+    env.MULTICA_WORKSPACE_ID = workspaceId;
+  }
+  return env;
+}
+
+async function runMultica<T = string>(
+  args: string[],
+  opts?: ExecOptions & { parseJson?: boolean; workspaceId?: string },
+): Promise<T> {
+  const path = await resolveMulticaPath();
+  const env = opts?.env ?? buildEnv(opts?.workspaceId);
+  const { stdout } = await exec(path, args, { env });
+  if (opts?.parseJson) {
+    return JSON.parse(stdout) as T;
+  }
+  return stdout.trim() as unknown as T;
+}
+
+/**
+ * Parse the table output of `multica workspace list` (which doesn't support --output json).
+ * Output format:
+ *   ID                                    NAME
+ *   d8ea625e-...                           Web3Gate
+ */
+function parseWorkspaceTable(output: string): MulticaWorkspace[] {
+  const lines = output.trim().split('\n');
+  // Skip header line
+  const dataLines = lines.slice(1);
+  const workspaces: MulticaWorkspace[] = [];
+  for (const line of dataLines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // ID is 36 chars (UUID) + 2 spaces, then name
+    const id = trimmed.slice(0, 36).trim();
+    const name = trimmed.slice(38).trim();
+    if (id && name) {
+      workspaces.push({ id, name });
+    }
+  }
+  return workspaces;
+}
+
+// ── Read Operations ──
+
+export async function listWorkspaces(): Promise<MulticaWorkspace[]> {
+  const output = await runMultica(['workspace', 'list']);
+  return parseWorkspaceTable(output);
+}
+
+export async function listAgents(workspaceId: string): Promise<MulticaAgent[]> {
+  return runMultica(['agent', 'list', '--output', 'json'], { parseJson: true, workspaceId }) as Promise<MulticaAgent[]>;
+}
+
+export async function listRuntimes(workspaceId: string): Promise<MulticaRuntime[]> {
+  return runMultica(['runtime', 'list', '--output', 'json'], { parseJson: true, workspaceId }) as Promise<MulticaRuntime[]>;
+}
+
+export async function listProjects(workspaceId: string): Promise<MulticaProject[]> {
+  return runMultica(['project', 'list', '--output', 'json'], { parseJson: true, workspaceId }) as Promise<MulticaProject[]>;
+}
+
+export async function listLabels(workspaceId: string): Promise<MulticaLabel[]> {
+  return runMultica(['label', 'list', '--output', 'json'], { parseJson: true, workspaceId }) as Promise<MulticaLabel[]>;
+}
+
+export async function listAutopilots(workspaceId: string): Promise<MulticaAutopilot[]> {
+  return runMultica(['autopilot', 'list', '--output', 'json'], { parseJson: true, workspaceId }).then((data: any) => {
+    // autopilot list returns { autopilots: [...] }
+    if (data && data.autopilots) return data.autopilots as MulticaAutopilot[];
+    return data as MulticaAutopilot[];
+  });
+}
+
+// ── Mutations ──
+
+export interface AgentCreateOpts {
+  name: string;
+  description: string;
+  instructions: string;
+  runtimeId: string;
+  model?: string;
+  customArgs?: string[];
+  customEnv?: Record<string, string>;
+}
+
+export async function createAgent(workspaceId: string, opts: AgentCreateOpts): Promise<{ id: string }> {
+  const args = ['agent', 'create',
+    '--name', opts.name,
+    '--description', opts.description,
+    '--instructions', opts.instructions,
+    '--runtime-id', opts.runtimeId,
+    '--output', 'json',
+  ];
+  if (opts.model) {
+    args.push('--model', opts.model);
+  }
+  if (opts.customArgs && opts.customArgs.length > 0) {
+    args.push('--custom-args', JSON.stringify(opts.customArgs));
+  }
+  if (opts.customEnv && Object.keys(opts.customEnv).length > 0) {
+    args.push('--custom-env', JSON.stringify(opts.customEnv));
+  }
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export interface AgentUpdateOpts {
+  name?: string;
+  description?: string;
+  instructions?: string;
+  model?: string;
+  customArgs?: string[];
+  customEnv?: Record<string, string>;
+}
+
+export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promise<void> {
+  const args = ['agent', 'update', agentId];
+  if (opts.name) args.push('--name', opts.name);
+  if (opts.description) args.push('--description', opts.description);
+  if (opts.instructions) args.push('--instructions', opts.instructions);
+  if (opts.model !== undefined) args.push('--model', opts.model);
+  if (opts.customArgs) args.push('--custom-args', JSON.stringify(opts.customArgs));
+  if (opts.customEnv) args.push('--custom-env', JSON.stringify(opts.customEnv));
+  await runMultica(args);
+}
+
+export interface ProjectCreateOpts {
+  title: string;
+  description: string;
+  status: string;
+}
+
+export async function createProject(workspaceId: string, opts: ProjectCreateOpts): Promise<{ id: string }> {
+  const args = ['project', 'create',
+    '--title', opts.title,
+    '--description', opts.description,
+    '--status', opts.status,
+    '--output', 'json',
+  ];
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export interface LabelCreateOpts {
+  name: string;
+  color: string;
+}
+
+export async function createLabel(workspaceId: string, opts: LabelCreateOpts): Promise<{ id: string }> {
+  const args = ['label', 'create',
+    '--name', opts.name,
+    '--color', opts.color,
+    '--output', 'json',
+  ];
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export interface AutopilotCreateOpts {
+  title: string;
+  description: string;
+  agentId: string;
+  mode: 'run_only' | 'create_issue';
+}
+
+export async function createAutopilot(workspaceId: string, opts: AutopilotCreateOpts): Promise<{ id: string }> {
+  const args = ['autopilot', 'create',
+    '--title', opts.title,
+    '--description', opts.description,
+    '--agent', opts.agentId,
+    '--mode', opts.mode,
+    '--output', 'json',
+  ];
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export async function getAutopilotDetail(autopilotId: string, workspaceId: string): Promise<MulticaAutopilotDetail> {
+  return runMultica(['autopilot', 'get', autopilotId, '--output', 'json'], {
+    parseJson: true,
+    workspaceId,
+  }) as Promise<MulticaAutopilotDetail>;
+}
+
+export interface AutopilotTriggerAddOpts {
+  cron: string;
+  timezone: string;
+  label?: string;
+}
+
+export async function addAutopilotTrigger(
+  autopilotId: string,
+  opts: AutopilotTriggerAddOpts,
+  workspaceId: string,
+): Promise<{ id: string }> {
+  const args = ['autopilot', 'trigger-add', autopilotId,
+    '--cron', opts.cron,
+    '--timezone', opts.timezone,
+    '--output', 'json',
+  ];
+  if (opts.label) {
+    args.push('--label', opts.label);
+  }
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export async function getWorkspaceConfig() {
+  return loadConfig();
+}
