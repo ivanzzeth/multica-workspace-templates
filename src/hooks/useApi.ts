@@ -49,6 +49,13 @@ export interface TemplateAutopilot {
   description: string;
   agent_ref: string;
   mode: string;
+  triggers?: TemplateAutopilotTrigger[];
+}
+
+export interface TemplateAutopilotTrigger {
+  cron: string;
+  timezone: string;
+  label?: string;
 }
 
 export interface RuntimeInfo {
@@ -73,8 +80,8 @@ export interface DryRunItem {
 
 export interface ImportResult {
   success: boolean;
-  created: { agents: number; projects: number; labels: number; autopilots: number };
-  skipped: { agents: number; projects: number; labels: number; autopilots: number };
+  created: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
+  skipped: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
   updated: { agents: number };
   errors: string[];
 }

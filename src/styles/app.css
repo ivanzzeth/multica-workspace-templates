@@ -85,6 +85,15 @@ body {
   margin-bottom: 16px;
   font-size: 13px;
 }
+.warning-banner {
+  background: #3b2f0f;
+  border: 1px solid var(--yellow);
+  color: #fde68a;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  font-size: 13px;
+}
 
 .spinner {
   width: 32px; height: 32px;

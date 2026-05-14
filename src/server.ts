@@ -25,7 +25,7 @@ export async function createExpressApp(isDev: boolean) {
   } else {
     const clientDir = resolve(__dirname, '../dist/client');
     app.use(express.static(clientDir));
-    app.get('*', (_req, res) => {
+    app.get('/{*path}', (_req, res) => {
       const indexPath = join(clientDir, 'index.html');
       if (existsSync(indexPath)) {
         res.sendFile(indexPath);

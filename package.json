@@ -1,18 +1,32 @@
 {
   "name": "multica-workspace-templates",
   "version": "1.0.0",
-  "private": true,
+  "description": "Multica workspace template manager — import/export agent teams, projects, labels, and autopilots",
   "type": "module",
+  "bin": {
+    "multica-templates": "./bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "src/",
+    "templates/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "tsx src/main.ts --dev",
     "dev:electron": "tsx src/main.ts --dev --electron",
     "start": "tsx src/main.ts",
     "start:electron": "tsx src/main.ts --electron",
     "build": "vite build",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "express": "^5.1.0",
+    "open": "^10.2.0",
+    "tsx": "^4.19.3",
     "yaml": "^2.7.1"
   },
   "devDependencies": {
@@ -24,7 +38,6 @@
     "electron": "^35.1.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "tsx": "^4.19.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.2"
   }

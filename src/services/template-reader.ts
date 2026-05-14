@@ -1,24 +1,48 @@
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname, resolve } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { parse as parseYaml } from 'yaml';
 import type { Template, TemplateSummary } from '../types/template.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEMPLATES_DIR = resolve(__dirname, '../../templates');
+const BUILTIN_DIR = resolve(__dirname, '../../templates');
 
 export class TemplateReader {
-  private templatesDir: string;
+  private builtinDir: string;
+  private userDir: string;
 
-  constructor(templatesDir?: string) {
-    this.templatesDir = templatesDir || TEMPLATES_DIR;
+  constructor(builtinDir?: string, userDir?: string) {
+    this.builtinDir = builtinDir || BUILTIN_DIR;
+    this.userDir = userDir || join(homedir(), '.multica-templates');
+    // Ensure user dir exists so writer can write there
+    if (!existsSync(this.userDir)) {
+      mkdirSync(this.userDir, { recursive: true });
+    }
   }
 
   listTemplates(): TemplateSummary[] {
-    if (!existsSync(this.templatesDir)) return [];
-    const files = readdirSync(this.templatesDir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
+    const builtin = this.listFrom(this.builtinDir);
+    const user = this.listFrom(this.userDir);
+    // User templates override built-in when names collide
+    const userNames = new Set(user.map((t) => t.name));
+    return [...builtin.filter((t) => !userNames.has(t.name)), ...user];
+  }
+
+  readTemplate(name: string): Template {
+    // Try user dir first so custom templates take priority
+    try {
+      return this.readFrom(this.userDir, name);
+    } catch {
+      return this.readFrom(this.builtinDir, name);
+    }
+  }
+
+  private listFrom(dir: string): TemplateSummary[] {
+    if (!existsSync(dir)) return [];
+    const files = readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
     return files.map((f) => {
-      const t = this.readTemplate(f.replace(/\.ya?ml$/, ''));
+      const t = this.readFrom(dir, f.replace(/\.ya?ml$/, ''));
       return {
         name: t.name,
         description: t.description,
@@ -30,18 +54,17 @@ export class TemplateReader {
     });
   }
 
-  readTemplate(name: string): Template {
-    // Try both .yaml and .yml
+  private readFrom(dir: string, name: string): Template {
     let content: string | null = null;
     for (const ext of ['.yaml', '.yml']) {
-      const p = join(this.templatesDir, `${name}${ext}`);
+      const p = join(dir, `${name}${ext}`);
       if (existsSync(p)) {
         content = readFileSync(p, 'utf-8');
         break;
       }
     }
     if (!content) {
-      throw new Error(`Template "${name}" not found in ${this.templatesDir}`);
+      throw new Error(`Template "${name}" not found in ${dir}`);
     }
     const template = parseYaml(content) as Template;
     this.validate(template, name);
@@ -53,7 +76,6 @@ export class TemplateReader {
     if (!t.agents?.length) throw new Error(`Template "${name}" has no agents`);
     if (!t.projects?.length) throw new Error(`Template "${name}" has no projects`);
 
-    // Validate agent_refs in autopilots
     const agentNames = new Set(t.agents.map((a) => a.name));
     for (const ap of t.autopilots || []) {
       if (!agentNames.has(ap.agent_ref)) {

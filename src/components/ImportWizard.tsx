@@ -253,7 +253,7 @@ export function ImportWizard({ api }: Props) {
           <h2>Import Complete</h2>
           <div className="result-summary">
             <div className="result-stat ok">
-              <span className="stat-num">{result.created.agents + result.created.projects + result.created.labels + result.created.autopilots}</span>
+              <span className="stat-num">{result.created.agents + result.created.projects + result.created.labels + result.created.autopilots + result.created.triggers}</span>
               <span className="stat-label">Created</span>
             </div>
             <div className="result-stat warn">
@@ -261,7 +261,7 @@ export function ImportWizard({ api }: Props) {
               <span className="stat-label">Updated</span>
             </div>
             <div className="result-stat skip">
-              <span className="stat-num">{result.skipped.agents + result.skipped.projects + result.skipped.labels + result.skipped.autopilots}</span>
+              <span className="stat-num">{result.skipped.agents + result.skipped.projects + result.skipped.labels + result.skipped.autopilots + result.skipped.triggers}</span>
               <span className="stat-label">Skipped</span>
             </div>
             <div className="result-stat err-stat">
@@ -274,6 +274,7 @@ export function ImportWizard({ api }: Props) {
             <p>Projects: {result.created.projects} created, {result.skipped.projects} skipped</p>
             <p>Labels: {result.created.labels} created, {result.skipped.labels} skipped</p>
             <p>Autopilots: {result.created.autopilots} created, {result.skipped.autopilots} skipped</p>
+            <p>Triggers: {result.created.triggers} created, {result.skipped.triggers} skipped</p>
           </div>
           {result.errors.length > 0 && (
             <div className="error-list">

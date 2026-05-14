@@ -1,17 +1,14 @@
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { homedir } from 'os';
 import { stringify as stringifyYaml } from 'yaml';
 import type { Template } from '../types/template.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEMPLATES_DIR = resolve(__dirname, '../../templates');
 
 export class TemplateWriter {
   private templatesDir: string;
 
   constructor(templatesDir?: string) {
-    this.templatesDir = templatesDir || TEMPLATES_DIR;
+    this.templatesDir = templatesDir || join(homedir(), '.multica-templates');
   }
 
   saveTemplate(template: Template, filename?: string): string {
