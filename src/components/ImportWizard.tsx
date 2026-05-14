@@ -148,7 +148,7 @@ export function ImportWizard({ api }: Props) {
           <p className="hint">Choose a template to preview and import.</p>
           {templates.map((t) => (
             <button key={t.name} className="template-card" onClick={() => selectTemplate(t.name)}>
-              <strong>{t.name}</strong>
+              <strong>{t.name} <span className="version-badge">v{t.version}</span></strong>
               <span className="desc">{t.description}</span>
               <span className="badges">
                 <span>{t.agent_count} agents</span>

@@ -14,7 +14,7 @@ export async function createApiRouter() {
   const writer = new TemplateWriter();
   const scanner = new WorkspaceScanner();
   const importer = new ImportEngine(reader, scanner);
-  const exporter = new ExportEngine(scanner, writer);
+  const exporter = new ExportEngine(scanner, writer, reader);
 
   // ── Workspaces ──
 
@@ -123,8 +123,8 @@ export async function createApiRouter() {
         res.status(400).json({ error: 'Missing workspace_id or name' });
         return;
       }
-      const path = await exporter.apply(workspace_id, name);
-      res.json({ saved_to: path });
+      const result = await exporter.apply(workspace_id, name);
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

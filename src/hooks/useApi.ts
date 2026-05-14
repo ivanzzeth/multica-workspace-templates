@@ -10,6 +10,7 @@ export interface Workspace {
 
 export interface TemplateSummary {
   name: string;
+  version: string;
   description: string;
   agent_count: number;
   project_count: number;
@@ -18,6 +19,7 @@ export interface TemplateSummary {
 }
 
 export interface TemplateDetail {
+  version: string;
   name: string;
   description: string;
   agents: TemplateAgent[];
@@ -173,7 +175,7 @@ export function useApi() {
       body: JSON.stringify({ workspace_id: workspaceId, name }),
     });
     const data = await res.json();
-    return data.saved_to as string;
+    return data as { saved_to: string; version: string };
   }, []);
 
   return {

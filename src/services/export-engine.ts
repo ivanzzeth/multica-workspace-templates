@@ -1,5 +1,6 @@
 import type { Template, TemplateAgent, TemplateAutopilot, TemplateAutopilotTrigger } from '../types/template.js';
 import type { MulticaAutopilotDetail } from '../types/multica.js';
+import { TemplateReader } from './template-reader.js';
 import { WorkspaceScanner } from './workspace-scanner.js';
 import { TemplateWriter } from './template-writer.js';
 import * as cli from './cli.js';
@@ -8,6 +9,7 @@ export class ExportEngine {
   constructor(
     private scanner: WorkspaceScanner,
     private writer: TemplateWriter,
+    private reader?: TemplateReader,
     private workspaceId?: string,
   ) {}
 
@@ -17,11 +19,33 @@ export class ExportEngine {
     return this.buildTemplate('Exported', state, triggersMap);
   }
 
-  async apply(workspaceId: string, name: string): Promise<string> {
+  async apply(workspaceId: string, name: string): Promise<{ saved_to: string; version: string }> {
     const state = await this.scanner.scanWorkspace(workspaceId);
     const triggersMap = await this.fetchTriggers(state.autopilots.map((a) => a.id), workspaceId);
-    const template = this.buildTemplate(name, state, triggersMap);
-    return this.writer.saveTemplate(template, `${name.toLowerCase().replace(/\s+/g, '-')}.yaml`);
+    const version = this.nextVersion(name);
+    const template = this.buildTemplate(name, state, triggersMap, version);
+    const saved_to = this.writer.saveTemplate(template, `${name.toLowerCase().replace(/\s+/g, '-')}.yaml`);
+    return { saved_to, version };
+  }
+
+  private nextVersion(name: string): string {
+    if (!this.reader) return '1.0';
+    // Try original name first, then kebab-case (matching saveTemplate filename logic)
+    const candidates = [name, name.toLowerCase().replace(/\s+/g, '-')];
+    for (const candidate of candidates) {
+      try {
+        const existing = this.reader.readTemplate(candidate);
+        const v = existing.version || '1.0';
+        const parts = v.split('.');
+        const major = parseInt(parts[0], 10) || 1;
+        const minor = parseInt(parts[1], 10) || 0;
+        if (minor === 99) return `${major + 1}.0`;
+        return `${major}.${minor + 1}`;
+      } catch {
+        continue;
+      }
+    }
+    return '1.0';
   }
 
   private async fetchTriggers(
@@ -53,6 +77,7 @@ export class ExportEngine {
     name: string,
     state: Awaited<ReturnType<WorkspaceScanner['scanWorkspace']>>,
     triggersMap: Map<string, TemplateAutopilotTrigger[]>,
+    version?: string,
   ): Template {
     const runtimeProviderMap = new Map<string, string>();
     for (const r of state.runtimes) {
@@ -86,7 +111,7 @@ export class ExportEngine {
     });
 
     return {
-      version: '1.0',
+      version: version || '1.0',
       name,
       description: `Exported from Multica workspace`,
       agents,

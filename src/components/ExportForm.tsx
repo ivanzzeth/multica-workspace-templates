@@ -14,6 +14,7 @@ export function ExportForm({ api }: Props) {
   const [preview, setPreview] = useState<TemplateDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [savedTo, setSavedTo] = useState<string | null>(null);
+  const [exportedVersion, setExportedVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const doPreview = useCallback(async (ws: Workspace) => {
@@ -36,8 +37,9 @@ export function ExportForm({ api }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const path = await api.exportApply(selectedWs.id, name.trim());
-      setSavedTo(path);
+      const result = await api.exportApply(selectedWs.id, name.trim());
+      setSavedTo(result.saved_to);
+      setExportedVersion(result.version);
     } catch (e: any) {
       setError(e.message);
     }
@@ -52,7 +54,8 @@ export function ExportForm({ api }: Props) {
     setError(null);
   }, []);
 
-  const hasOverwrite = preview && api.templates.some((t) => t.name === name.trim());
+  const hasOverwrite = preview && api.templates.find((t) => t.name === name.trim());
+  const existingVersion = hasOverwrite?.version;
 
   return (
     <div className="wizard">
@@ -70,7 +73,7 @@ export function ExportForm({ api }: Props) {
       {error && <div className="error-banner">{error}</div>}
       {savedTo && (
         <div className="success-banner">
-          Template saved to: <code>{savedTo}</code>
+          Template v{exportedVersion} saved to: <code>{savedTo}</code>
         </div>
       )}
 
@@ -134,7 +137,7 @@ export function ExportForm({ api }: Props) {
 
           {hasOverwrite && (
             <div className="warning-banner">
-              A template named "{name}" already exists. Exporting will overwrite it.
+              A template named "{name}" already exists (v{existingVersion}). Exporting will overwrite it with the next version.
             </div>
           )}
 

@@ -45,6 +45,7 @@ export class TemplateReader {
       const t = this.readFrom(dir, f.replace(/\.ya?ml$/, ''));
       return {
         name: t.name,
+        version: t.version,
         description: t.description,
         agent_count: t.agents.length,
         project_count: t.projects.length,
