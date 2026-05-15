@@ -18,7 +18,18 @@ export class ImportEngine {
       projects: [],
       labels: [],
       autopilots: [],
+      skills: [],
     };
+
+    // Skills
+    const existingSkillNames = new Set(existing.skills.map((s) => s.name));
+    for (const skill of template.skills || []) {
+      if (existingSkillNames.has(skill.name)) {
+        result.skills.push({ name: skill.name, action: 'skip', reason: 'Skill already exists' });
+      } else {
+        result.skills.push({ name: skill.name, action: 'create' });
+      }
+    }
 
     for (const agent of template.agents) {
       const match = existing.agents.find((a) => a.name === agent.name);
@@ -75,8 +86,8 @@ export class ImportEngine {
 
     const result: ImportResult = {
       success: true,
-      created: { agents: 0, projects: 0, labels: 0, autopilots: 0, triggers: 0 },
-      skipped: { agents: 0, projects: 0, labels: 0, autopilots: 0, triggers: 0 },
+      created: { agents: 0, projects: 0, labels: 0, autopilots: 0, triggers: 0, skills: 0 },
+      skipped: { agents: 0, projects: 0, labels: 0, autopilots: 0, triggers: 0, skills: 0 },
       updated: { agents: 0 },
       errors: [],
     };
@@ -88,6 +99,48 @@ export class ImportEngine {
     }
 
     try {
+      // 0. Skills (no dependencies)
+      const skillNameToId = new Map<string, string>(); // skill name → multica skill ID
+      const existingSkillNameToId = new Map<string, string>();
+      for (const s of existing.skills) {
+        existingSkillNameToId.set(s.name, s.id);
+      }
+
+      for (const skill of template.skills || []) {
+        const existingId = existingSkillNameToId.get(skill.name);
+        if (existingId) {
+          skillNameToId.set(skill.name, existingId);
+          result.skipped.skills++;
+          continue;
+        }
+        try {
+          const mainContent = skill.files?.find((f) => f.path === 'index.ts' || f.path === 'index.js' || f.path === 'main.ts' || f.path === 'main.js')?.content || '';
+          const config = skill.config ? JSON.stringify(skill.config) : undefined;
+          const created = await cli.createSkill(opts.workspace_id, {
+            name: skill.name,
+            description: skill.description,
+            content: mainContent,
+            config,
+          });
+          skillNameToId.set(skill.name, created.id);
+
+          // Upsert additional files
+          if (skill.files) {
+            for (const file of skill.files) {
+              try {
+                await cli.skillFilesUpsert(created.id, file.path, file.content, opts.workspace_id);
+              } catch (err: any) {
+                result.errors.push(`Failed to upsert skill file "${file.path}" for skill "${skill.name}": ${err.message}`);
+              }
+            }
+          }
+
+          result.created.skills++;
+        } catch (err: any) {
+          result.errors.push(`Failed to create skill "${skill.name}": ${err.message}`);
+        }
+      }
+
       // 1. Labels (no dependencies)
       for (const label of template.labels) {
         const exists = existing.labels.find((l) => l.name === label.name);
@@ -147,6 +200,21 @@ export class ImportEngine {
           } else {
             result.skipped.agents++;
           }
+
+          // Assign skills to existing agent if template has skills
+          if (agent.skills?.length) {
+            const skillIds = agent.skills
+              .map((name) => skillNameToId.get(name))
+              .filter((id): id is string => !!id);
+            if (skillIds.length > 0) {
+              try {
+                await cli.agentSkillsSet(existingAgent.id, skillIds, opts.workspace_id);
+              } catch (err: any) {
+                result.errors.push(`Failed to assign skills to agent "${agent.name}": ${err.message}`);
+              }
+            }
+          }
+
           continue;
         }
 
@@ -170,6 +238,21 @@ export class ImportEngine {
             customEnv: env,
           });
           agentIdMap.set(agent.name, created.id);
+
+          // Assign skills to new agent
+          if (agent.skills?.length) {
+            const skillIds = agent.skills
+              .map((name) => skillNameToId.get(name))
+              .filter((id): id is string => !!id);
+            if (skillIds.length > 0) {
+              try {
+                await cli.agentSkillsSet(created.id, skillIds, opts.workspace_id);
+              } catch (err: any) {
+                result.errors.push(`Failed to assign skills to agent "${agent.name}": ${err.message}`);
+              }
+            }
+          }
+
           result.created.agents++;
         } catch (err: any) {
           result.errors.push(`Failed to create agent "${agent.name}": ${err.message}`);
@@ -242,26 +325,15 @@ export class ImportEngine {
     return result;
   }
 
-  /**
-   * Resolve env var placeholders from the template.
-   * Template values like "${ANTHROPIC_AUTH_TOKEN}" are kept as-is;
-   * the user provides actual values during runtime mapping step.
-   * For now, we use whatever env values the template defines.
-   * Empty object means no env vars needed.
-   */
   private resolveEnv(template?: Record<string, string>): Record<string, string> | undefined {
     if (!template || Object.keys(template).length === 0) return undefined;
     const resolved: Record<string, string> = {};
     for (const [key, value] of Object.entries(template)) {
-      // If value is a placeholder like "${SOMETHING}", skip it unless the user provided it
-      // In a full implementation, the frontend would collect env values.
-      // For now, keep the key with an empty value so the agent gets the env var slot.
       if (value.startsWith('${') && value.endsWith('}')) {
         const envVal = process.env[key];
         if (envVal) {
           resolved[key] = envVal;
         }
-        // else: skip — agent will have no value for this env var
       } else {
         resolved[key] = value;
       }

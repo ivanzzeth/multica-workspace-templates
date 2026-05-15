@@ -9,6 +9,8 @@ import type {
   MulticaLabel,
   MulticaAutopilot,
   MulticaAutopilotDetail,
+  MulticaSkill,
+  MulticaSkillDetail,
 } from '../types/multica.js';
 
 const exec = promisify(execFile);
@@ -141,6 +143,9 @@ export interface AgentUpdateOpts {
   model?: string;
   customArgs?: string[];
   customEnv?: Record<string, string>;
+  maxConcurrentTasks?: number;
+  mcpConfig?: string;
+  runtimeConfig?: string;
 }
 
 export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promise<void> {
@@ -151,6 +156,9 @@ export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promi
   if (opts.model !== undefined) args.push('--model', opts.model);
   if (opts.customArgs) args.push('--custom-args', JSON.stringify(opts.customArgs));
   if (opts.customEnv) args.push('--custom-env', JSON.stringify(opts.customEnv));
+  if (opts.maxConcurrentTasks !== undefined) args.push('--max-concurrent-tasks', String(opts.maxConcurrentTasks));
+  if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig);
+  if (opts.runtimeConfig) args.push('--runtime-config', opts.runtimeConfig);
   await runMultica(args);
 }
 
@@ -233,4 +241,61 @@ export async function addAutopilotTrigger(
 
 export async function getWorkspaceConfig() {
   return loadConfig();
+}
+
+// ── Skills ──
+
+export async function listSkills(workspaceId: string): Promise<MulticaSkill[]> {
+  return runMultica(['skill', 'list', '--output', 'json'], { parseJson: true, workspaceId }).then((data: any) => {
+    if (data && data.skills) return data.skills as MulticaSkill[];
+    return data as MulticaSkill[];
+  });
+}
+
+export async function getSkill(id: string, workspaceId: string): Promise<MulticaSkillDetail> {
+  return runMultica(['skill', 'get', id, '--output', 'json'], {
+    parseJson: true,
+    workspaceId,
+  }) as Promise<MulticaSkillDetail>;
+}
+
+export interface SkillCreateOpts {
+  name: string;
+  description: string;
+  content: string;
+  config?: string;
+}
+
+export async function createSkill(workspaceId: string, opts: SkillCreateOpts): Promise<{ id: string }> {
+  const args = ['skill', 'create',
+    '--name', opts.name,
+    '--description', opts.description,
+    '--content', opts.content,
+    '--output', 'json',
+  ];
+  if (opts.config) {
+    args.push('--config', opts.config);
+  }
+  return runMultica(args, { parseJson: true, workspaceId }) as Promise<{ id: string }>;
+}
+
+export async function skillFilesUpsert(
+  skillId: string,
+  path: string,
+  content: string,
+  workspaceId: string,
+): Promise<void> {
+  await runMultica(['skill', 'files', 'upsert', skillId, '--path', path, '--content', content], {
+    workspaceId,
+  });
+}
+
+export async function agentSkillsSet(
+  agentId: string,
+  skillIds: string[],
+  workspaceId: string,
+): Promise<void> {
+  await runMultica(['agent', 'skills', 'set', agentId, '--skill-ids', skillIds.join(',')], {
+    workspaceId,
+  });
 }

@@ -94,6 +94,7 @@ export function ExportForm({ api }: Props) {
             <span>{preview.projects.length} projects</span>
             <span>{preview.labels.length} labels</span>
             <span>{preview.autopilots.length} autopilots</span>
+            {preview.skills && <span>{preview.skills.length} skills</span>}
           </div>
 
           {/* Agents preview */}
@@ -207,7 +208,7 @@ function AgentList({ agents }: { agents: TemplateDetail['agents'] }) {
         <span key={a.name} className="dry-item" style={{ borderColor: '#6366f1' }}>
           {a.name}
           <span className="reason" style={{ fontSize: 10 }}>
-            {a.runtime_provider}{a.model ? ` · ${a.model}` : ''}
+            {a.runtime_provider}{a.model ? ` · ${a.model}` : ''}{a.skills?.length ? ` · ${a.skills.length} skills` : ''}
           </span>
         </span>
       ))}

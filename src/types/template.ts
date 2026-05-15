@@ -1,3 +1,15 @@
+export interface TemplateSkillFile {
+  path: string;
+  content: string;
+}
+
+export interface TemplateSkill {
+  name: string;
+  description: string;
+  config?: Record<string, any>;
+  files?: TemplateSkillFile[];
+}
+
 export interface TemplateAgent {
   name: string;
   description: string;
@@ -6,6 +18,10 @@ export interface TemplateAgent {
   runtime_provider: string;
   custom_args?: string[];
   custom_env_template?: Record<string, string>;
+  skills?: string[];
+  max_concurrent_tasks?: number;
+  runtime_config?: Record<string, any>;
+  mcp_config?: Record<string, string> | null;
 }
 
 export interface TemplateProject {
@@ -46,6 +62,7 @@ export interface Template {
   labels: TemplateLabel[];
   autopilots: TemplateAutopilot[];
   runtime_mapping: Record<string, RuntimeMappingEntry>;
+  skills?: TemplateSkill[];
 }
 
 export type ImportMode = 'skip-existing' | 'force-overwrite';
@@ -75,21 +92,24 @@ export interface DryRunResult {
   projects: DryRunItem[];
   labels: DryRunItem[];
   autopilots: DryRunItem[];
+  skills: DryRunItem[];
 }
 
 export interface ImportResult {
   success: boolean;
-  created: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
-  skipped: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
+  created: { agents: number; projects: number; labels: number; autopilots: number; triggers: number; skills: number };
+  skipped: { agents: number; projects: number; labels: number; autopilots: number; triggers: number; skills: number };
   updated: { agents: number };
   errors: string[];
 }
 
 export interface TemplateSummary {
   name: string;
+  version: string;
   description: string;
   agent_count: number;
   project_count: number;
   label_count: number;
   autopilot_count: number;
+  skill_count: number;
 }

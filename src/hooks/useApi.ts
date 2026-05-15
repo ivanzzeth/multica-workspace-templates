@@ -16,6 +16,7 @@ export interface TemplateSummary {
   project_count: number;
   label_count: number;
   autopilot_count: number;
+  skill_count: number;
 }
 
 export interface TemplateDetail {
@@ -26,6 +27,19 @@ export interface TemplateDetail {
   projects: TemplateProject[];
   labels: TemplateLabel[];
   autopilots: TemplateAutopilot[];
+  skills?: TemplateSkill[];
+}
+
+export interface TemplateSkill {
+  name: string;
+  description: string;
+  config?: Record<string, any>;
+  files?: TemplateSkillFile[];
+}
+
+export interface TemplateSkillFile {
+  path: string;
+  content: string;
 }
 
 export interface TemplateAgent {
@@ -33,6 +47,7 @@ export interface TemplateAgent {
   description: string;
   runtime_provider: string;
   model: string;
+  skills?: string[];
 }
 
 export interface TemplateProject {
@@ -72,6 +87,7 @@ export interface DryRunResult {
   projects: DryRunItem[];
   labels: DryRunItem[];
   autopilots: DryRunItem[];
+  skills: DryRunItem[];
 }
 
 export interface DryRunItem {
@@ -82,8 +98,8 @@ export interface DryRunItem {
 
 export interface ImportResult {
   success: boolean;
-  created: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
-  skipped: { agents: number; projects: number; labels: number; autopilots: number; triggers: number };
+  created: { agents: number; projects: number; labels: number; autopilots: number; triggers: number; skills: number };
+  skipped: { agents: number; projects: number; labels: number; autopilots: number; triggers: number; skills: number };
   updated: { agents: number };
   errors: string[];
 }

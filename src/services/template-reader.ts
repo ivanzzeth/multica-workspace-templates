@@ -51,6 +51,7 @@ export class TemplateReader {
         project_count: t.projects.length,
         label_count: t.labels.length,
         autopilot_count: t.autopilots.length,
+        skill_count: t.skills?.length ?? 0,
       };
     });
   }

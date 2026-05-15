@@ -38,13 +38,14 @@ export async function createExpressApp(isDev: boolean) {
   return app;
 }
 
-export async function startServer(port: number, isDev: boolean) {
+export async function startServer(port: number, isDev: boolean, host: string = 'localhost') {
   const app = await createExpressApp(isDev);
 
   return new Promise<{ app: express.Application; port: number }>((resolve) => {
-    const server = app.listen(port, () => {
-      console.log(`Server running at http://localhost:${port}`);
-      resolve({ app, port: (server.address() as any).port });
+    const server = app.listen(port, host, () => {
+      const addr = server.address() as any;
+      console.log(`Server running at http://${addr.address}:${addr.port}`);
+      resolve({ app, port: addr.port });
     });
   });
 }

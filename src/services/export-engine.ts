@@ -1,5 +1,5 @@
-import type { Template, TemplateAgent, TemplateAutopilot, TemplateAutopilotTrigger } from '../types/template.js';
-import type { MulticaAutopilotDetail } from '../types/multica.js';
+import type { Template, TemplateAgent, TemplateAutopilot, TemplateAutopilotTrigger, TemplateSkill, TemplateSkillFile } from '../types/template.js';
+import type { MulticaAutopilotDetail, MulticaSkillDetail } from '../types/multica.js';
 import { TemplateReader } from './template-reader.js';
 import { WorkspaceScanner } from './workspace-scanner.js';
 import { TemplateWriter } from './template-writer.js';
@@ -16,21 +16,22 @@ export class ExportEngine {
   async preview(workspaceId: string): Promise<Template> {
     const state = await this.scanner.scanWorkspace(workspaceId);
     const triggersMap = await this.fetchTriggers(state.autopilots.map((a) => a.id), workspaceId);
-    return this.buildTemplate('Exported', state, triggersMap);
+    const skillsDetail = await this.fetchSkillDetails(state);
+    return this.buildTemplate('Exported', state, triggersMap, skillsDetail);
   }
 
   async apply(workspaceId: string, name: string): Promise<{ saved_to: string; version: string }> {
     const state = await this.scanner.scanWorkspace(workspaceId);
     const triggersMap = await this.fetchTriggers(state.autopilots.map((a) => a.id), workspaceId);
+    const skillsDetail = await this.fetchSkillDetails(state);
     const version = this.nextVersion(name);
-    const template = this.buildTemplate(name, state, triggersMap, version);
+    const template = this.buildTemplate(name, state, triggersMap, skillsDetail, version);
     const saved_to = this.writer.saveTemplate(template, `${name.toLowerCase().replace(/\s+/g, '-')}.yaml`);
     return { saved_to, version };
   }
 
   private nextVersion(name: string): string {
     if (!this.reader) return '1.0';
-    // Try original name first, then kebab-case (matching saveTemplate filename logic)
     const candidates = [name, name.toLowerCase().replace(/\s+/g, '-')];
     for (const candidate of candidates) {
       try {
@@ -73,10 +74,37 @@ export class ExportEngine {
     return map;
   }
 
+  private async fetchSkillDetails(
+    state: Awaited<ReturnType<WorkspaceScanner['scanWorkspace']>>,
+  ): Promise<Map<string, MulticaSkillDetail>> {
+    const referencedIds = new Set<string>();
+    for (const agent of state.agents) {
+      if (agent.skills?.length) {
+        for (const s of agent.skills) {
+          referencedIds.add(s.id);
+        }
+      }
+    }
+    if (referencedIds.size === 0) return new Map();
+
+    const map = new Map<string, MulticaSkillDetail>();
+    const wsId = state.agents[0]?.workspace_id || '';
+    for (const id of referencedIds) {
+      try {
+        const detail = await cli.getSkill(id, wsId);
+        map.set(id, detail);
+      } catch {
+        // Silently skip skills we can't read
+      }
+    }
+    return map;
+  }
+
   private buildTemplate(
     name: string,
     state: Awaited<ReturnType<WorkspaceScanner['scanWorkspace']>>,
     triggersMap: Map<string, TemplateAutopilotTrigger[]>,
+    skillsDetail?: Map<string, MulticaSkillDetail>,
     version?: string,
   ): Template {
     const runtimeProviderMap = new Map<string, string>();
@@ -84,20 +112,45 @@ export class ExportEngine {
       runtimeProviderMap.set(r.id, r.provider);
     }
 
-    const agents: TemplateAgent[] = state.agents.map((a) => ({
-      name: a.name,
-      description: a.description,
-      instructions: a.instructions,
-      model: a.model,
-      runtime_provider: runtimeProviderMap.get(a.runtime_id) || 'unknown',
-      custom_args: a.custom_args?.length ? a.custom_args : undefined,
-      custom_env_template: this.sanitizeEnv(a.custom_env),
-    }));
+    // Build template skill definitions (with files) from fetched details
+    const templateSkills: TemplateSkill[] = [];
+    const skillIdForDetail = new Map<string, string>(); // skill ID → skill name (for dedup)
+    if (skillsDetail) {
+      for (const [id, detail] of skillsDetail) {
+        skillIdForDetail.set(id, detail.name);
+        const files: TemplateSkillFile[] | undefined = detail.files?.length
+          ? detail.files.map((f) => ({ path: f.path, content: f.content }))
+          : undefined;
+        templateSkills.push({
+          name: detail.name,
+          description: detail.description,
+          config: Object.keys(detail.config || {}).length > 0 ? detail.config : undefined,
+          ...(files ? { files } : {}),
+        });
+      }
+    }
 
     const agentNameMap = new Map<string, string>();
     for (const a of state.agents) {
       agentNameMap.set(a.id, a.name);
     }
+
+    const agents: TemplateAgent[] = state.agents.map((a) => {
+      const agentSkillNames = a.skills?.map((s) => s.name).filter(Boolean);
+      return {
+        name: a.name,
+        description: a.description,
+        instructions: a.instructions,
+        model: a.model,
+        runtime_provider: runtimeProviderMap.get(a.runtime_id) || 'unknown',
+        custom_args: a.custom_args?.length ? a.custom_args : undefined,
+        custom_env_template: this.sanitizeEnv(a.custom_env),
+        ...(agentSkillNames?.length ? { skills: agentSkillNames } : {}),
+        ...(a.max_concurrent_tasks !== 6 ? { max_concurrent_tasks: a.max_concurrent_tasks } : {}),
+        ...(a.runtime_config && Object.keys(a.runtime_config).length > 0 ? { runtime_config: a.runtime_config } : {}),
+        ...(a.mcp_config ? { mcp_config: this.sanitizeMcpConfig(a.mcp_config) } : {}),
+      };
+    });
 
     const autopilots: TemplateAutopilot[] = state.autopilots.map((ap) => {
       const triggers = triggersMap.get(ap.id);
@@ -115,6 +168,7 @@ export class ExportEngine {
       name,
       description: `Exported from Multica workspace`,
       agents,
+      ...(templateSkills.length > 0 ? { skills: templateSkills } : {}),
       projects: state.projects.map((p) => ({
         title: p.title,
         description: p.description || '',
@@ -140,6 +194,15 @@ export class ExportEngine {
     if (!env || Object.keys(env).length === 0) return undefined;
     const sanitized: Record<string, string> = {};
     for (const key of Object.keys(env)) {
+      sanitized[key] = `\${${key}}`;
+    }
+    return sanitized;
+  }
+
+  private sanitizeMcpConfig(config: Record<string, any>): Record<string, string> | null {
+    if (!config || Object.keys(config).length === 0) return null;
+    const sanitized: Record<string, string> = {};
+    for (const key of Object.keys(config)) {
       sanitized[key] = `\${${key}}`;
     }
     return sanitized;

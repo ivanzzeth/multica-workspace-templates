@@ -13,9 +13,38 @@ export interface MulticaAgent {
   custom_args: string[];
   custom_env: Record<string, string>;
   custom_env_redacted: boolean;
+  skills: { id: string; name: string; description: string }[];
+  max_concurrent_tasks: number;
+  mcp_config: Record<string, any> | null;
+  mcp_config_redacted: boolean;
+  runtime_config: Record<string, any>;
+  runtime_mode: string;
+  avatar_url: string | null;
   status: string;
   visibility: string;
   workspace_id: string;
+}
+
+export interface MulticaSkill {
+  id: string;
+  name: string;
+  description: string;
+  config: Record<string, any>;
+  created_at: string;
+  created_by: string;
+  workspace_id: string;
+  updated_at: string;
+}
+
+export interface MulticaSkillDetail extends MulticaSkill {
+  files?: MulticaSkillFile[];
+}
+
+export interface MulticaSkillFile {
+  id: string;
+  skill_id: string;
+  path: string;
+  content: string;
 }
 
 export interface MulticaRuntime {

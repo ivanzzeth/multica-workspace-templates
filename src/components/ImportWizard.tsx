@@ -155,6 +155,7 @@ export function ImportWizard({ api }: Props) {
                 <span>{t.project_count} projects</span>
                 <span>{t.label_count} labels</span>
                 <span>{t.autopilot_count} autopilots</span>
+                {t.skill_count > 0 && <span>{t.skill_count} skills</span>}
               </span>
             </button>
           ))}
@@ -227,7 +228,7 @@ export function ImportWizard({ api }: Props) {
           {dryRun && (
             <div className="dry-run-result">
               <h3>Dry Run Results</h3>
-              {(['agents', 'projects', 'labels', 'autopilots'] as const).map((cat) => (
+              {(['skills', 'agents', 'projects', 'labels', 'autopilots'] as const).map((cat) => (
                 <div key={cat} className="dry-run-category">
                   <h4>{cat.charAt(0).toUpperCase() + cat.slice(1)}</h4>
                   <div className="dry-run-items">
@@ -253,7 +254,7 @@ export function ImportWizard({ api }: Props) {
           <h2>Import Complete</h2>
           <div className="result-summary">
             <div className="result-stat ok">
-              <span className="stat-num">{result.created.agents + result.created.projects + result.created.labels + result.created.autopilots + result.created.triggers}</span>
+              <span className="stat-num">{result.created.agents + result.created.projects + result.created.labels + result.created.autopilots + result.created.triggers + result.created.skills}</span>
               <span className="stat-label">Created</span>
             </div>
             <div className="result-stat warn">
@@ -261,7 +262,7 @@ export function ImportWizard({ api }: Props) {
               <span className="stat-label">Updated</span>
             </div>
             <div className="result-stat skip">
-              <span className="stat-num">{result.skipped.agents + result.skipped.projects + result.skipped.labels + result.skipped.autopilots + result.skipped.triggers}</span>
+              <span className="stat-num">{result.skipped.agents + result.skipped.projects + result.skipped.labels + result.skipped.autopilots + result.skipped.triggers + result.skipped.skills}</span>
               <span className="stat-label">Skipped</span>
             </div>
             <div className="result-stat err-stat">
@@ -270,6 +271,7 @@ export function ImportWizard({ api }: Props) {
             </div>
           </div>
           <div className="result-details">
+            <p>Skills: {result.created.skills} created, {result.skipped.skills} skipped</p>
             <p>Agents: {result.created.agents} created, {result.updated.agents} updated, {result.skipped.agents} skipped</p>
             <p>Projects: {result.created.projects} created, {result.skipped.projects} skipped</p>
             <p>Labels: {result.created.labels} created, {result.skipped.labels} skipped</p>
