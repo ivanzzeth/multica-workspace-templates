@@ -99,10 +99,24 @@ export class ImportEngine {
       errors: [],
     };
 
-    // Build a map of runtime_provider → runtime_id from the user's mapping
+    // Build maps: template runtime_provider → assigned runtime_id, and runtime_id → actual provider
     const runtimeMap = new Map<string, string>();
+    const runtimeIdProvider = new Map<string, string>();
     for (const rm of opts.runtime_map) {
       runtimeMap.set(rm.runtime_provider, rm.runtime_id);
+      if (rm.runtime_id) {
+        runtimeIdProvider.set(rm.runtime_id, rm.runtime_provider);
+      }
+    }
+
+    // Drop runtime-specific custom_args when assigned runtime provider differs from template
+    function safeCustomArgs(templateProvider: string, assignedRuntimeId: string, templateArgs?: string[]): string[] | undefined {
+      if (!templateArgs || templateArgs.length === 0) return undefined;
+      const actualProvider = runtimeIdProvider.get(assignedRuntimeId);
+      if (actualProvider && actualProvider !== templateProvider) {
+        return undefined; // args specific to cursor/claude/etc — don't apply to wrong runtime
+      }
+      return templateArgs;
     }
 
     const envOverrides: Record<string, string> = opts.env_vars || {};
@@ -218,11 +232,12 @@ export class ImportEngine {
             try {
               const runtimeId = runtimeMap.get(agent.runtime_provider) || existingAgent.runtime_id;
               const env = resolveEnv(agent.custom_env_template);
+              const args = safeCustomArgs(agent.runtime_provider, runtimeId, agent.custom_args);
               await cli.updateAgent(existingAgent.id, {
                 description: agent.description,
                 instructions: agent.instructions,
                 model: agent.model || undefined,
-                customArgs: agent.custom_args,
+                customArgs: args,
                 customEnv: env,
               });
               result.updated.agents++;
@@ -263,13 +278,14 @@ export class ImportEngine {
 
         try {
           const env = resolveEnv(agent.custom_env_template);
+          const args = safeCustomArgs(agent.runtime_provider, runtimeId, agent.custom_args);
           const created = await cli.createAgent(opts.workspace_id, {
             name: agent.name,
             description: agent.description,
             instructions: agent.instructions,
             runtimeId,
             model: agent.model || undefined,
-            customArgs: agent.custom_args,
+            customArgs: args,
             customEnv: env,
           });
           agentIdMap.set(agent.name, created.id);
