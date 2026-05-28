@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import type { useApi, Workspace, TemplateDetail, TemplateAutopilot } from '../hooks/useApi.js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { useApi, Workspace, TemplateDetail, TemplateAutopilot, ExportOptions } from '../hooks/useApi.js';
 
 interface Props {
   api: ReturnType<typeof useApi>;
@@ -16,13 +16,27 @@ export function ExportForm({ api }: Props) {
   const [savedTo, setSavedTo] = useState<string | null>(null);
   const [exportedVersion, setExportedVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [options, setOptions] = useState<ExportOptions>({
+    agents: true,
+    autopilots: true,
+    skills: true,
+    projects: false,
+    labels: false,
+  });
+
+  const apiRef = useRef(api);
+  apiRef.current = api;
+
+  const toggleOption = (key: keyof ExportOptions) => {
+    setOptions((o) => ({ ...o, [key]: !o[key] }));
+  };
 
   const doPreview = useCallback(async (ws: Workspace) => {
     setSelectedWs(ws);
     setLoading(true);
     setError(null);
     try {
-      const t = await api.exportPreview(ws.id);
+      const t = await apiRef.current.exportPreview(ws.id, options);
       setPreview(t);
       setName(ws.name);
       setStep('preview');
@@ -30,21 +44,21 @@ export function ExportForm({ api }: Props) {
       setError(e.message);
     }
     setLoading(false);
-  }, [api]);
+  }, [options]);
 
   const doExport = useCallback(async () => {
     if (!selectedWs || !name.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await api.exportApply(selectedWs.id, name.trim());
+      const result = await apiRef.current.exportApply(selectedWs.id, name.trim(), options);
       setSavedTo(result.saved_to);
       setExportedVersion(result.version);
     } catch (e: any) {
       setError(e.message);
     }
     setLoading(false);
-  }, [selectedWs, name, api]);
+  }, [selectedWs, name, options]);
 
   const reset = useCallback(() => {
     setStep('workspace');
@@ -96,6 +110,31 @@ export function ExportForm({ api }: Props) {
             <span>{preview.autopilots.length} autopilots</span>
             {preview.skills && <span>{preview.skills.length} skills</span>}
           </div>
+
+          {/* Include/exclude checkboxes */}
+          <h3>Sections to Export</h3>
+          <p className="hint">Uncheck sections to exclude them. Projects and labels often contain workspace-specific data.</p>
+          <div className="checkbox-grid">
+            {([
+              ['agents', 'Agents'],
+              ['autopilots', 'Autopilots'],
+              ['skills', 'Skills'],
+              ['projects', 'Projects'],
+              ['labels', 'Labels'],
+            ] as [keyof ExportOptions, string][]).map(([key, label]) => (
+              <label key={key} className={`checkbox-option ${options[key] ? 'checked' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={options[key]}
+                  onChange={() => toggleOption(key)}
+                />
+                <span className="checkbox-label">{label}</span>
+              </label>
+            ))}
+          </div>
+          <button className="btn-small" style={{ margin: '8px 0 16px' }} onClick={() => selectedWs && doPreview(selectedWs)} disabled={loading}>
+            {loading ? 'Loading...' : 'Refresh Preview'}
+          </button>
 
           {/* Agents preview */}
           <h3>Agents</h3>
@@ -165,16 +204,19 @@ export function ExportForm({ api }: Props) {
 }
 
 function WorkspaceList({ api, onSelect }: { api: ReturnType<typeof useApi>; onSelect: (w: Workspace) => void }) {
-  const [list, setList] = useState<Workspace[]>(api.workspaces);
-  const [loading, setLoading] = useState(list.length === 0);
+  const [list, setList] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  if (loading) {
-    api.fetchWorkspaces()
+  const apiRef = useRef(api);
+  apiRef.current = api;
+
+  useEffect(() => {
+    apiRef.current.fetchWorkspaces()
       .then(setList)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }
+  }, []);
 
   if (error) return <div className="error-banner">{error}</div>;
   if (loading) return <div className="spinner" />;

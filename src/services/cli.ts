@@ -76,8 +76,12 @@ function parseWorkspaceTable(output: string): MulticaWorkspace[] {
 // ── Read Operations ──
 
 export async function listWorkspaces(): Promise<MulticaWorkspace[]> {
-  const output = await runMultica(['workspace', 'list']);
-  return parseWorkspaceTable(output);
+  const data = await runMultica(['workspace', 'list', '--output', 'json'], {
+    parseJson: true,
+  });
+  if (Array.isArray(data)) return data as MulticaWorkspace[];
+  // Fallback: if CLI changed format, try parsing table
+  return parseWorkspaceTable(data as unknown as string);
 }
 
 export async function listAgents(workspaceId: string): Promise<MulticaAgent[]> {

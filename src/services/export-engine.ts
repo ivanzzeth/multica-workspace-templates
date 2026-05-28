@@ -1,4 +1,4 @@
-import type { Template, TemplateAgent, TemplateAutopilot, TemplateAutopilotTrigger, TemplateSkill, TemplateSkillFile } from '../types/template.js';
+import type { Template, TemplateAgent, TemplateAutopilot, TemplateAutopilotTrigger, TemplateSkill, TemplateSkillFile, ExportOptions } from '../types/template.js';
 import type { MulticaAutopilotDetail, MulticaSkillDetail } from '../types/multica.js';
 import { TemplateReader } from './template-reader.js';
 import { WorkspaceScanner } from './workspace-scanner.js';
@@ -13,19 +13,19 @@ export class ExportEngine {
     private workspaceId?: string,
   ) {}
 
-  async preview(workspaceId: string): Promise<Template> {
+  async preview(workspaceId: string, opts?: ExportOptions): Promise<Template> {
     const state = await this.scanner.scanWorkspace(workspaceId);
     const triggersMap = await this.fetchTriggers(state.autopilots.map((a) => a.id), workspaceId);
-    const skillsDetail = await this.fetchSkillDetails(state);
-    return this.buildTemplate('Exported', state, triggersMap, skillsDetail);
+    const skillsDetail = opts?.skills !== false ? await this.fetchSkillDetails(state) : undefined;
+    return this.buildTemplate('Exported', state, triggersMap, skillsDetail, '1.0', opts);
   }
 
-  async apply(workspaceId: string, name: string): Promise<{ saved_to: string; version: string }> {
+  async apply(workspaceId: string, name: string, opts?: ExportOptions): Promise<{ saved_to: string; version: string }> {
     const state = await this.scanner.scanWorkspace(workspaceId);
     const triggersMap = await this.fetchTriggers(state.autopilots.map((a) => a.id), workspaceId);
-    const skillsDetail = await this.fetchSkillDetails(state);
+    const skillsDetail = opts?.skills !== false ? await this.fetchSkillDetails(state) : undefined;
     const version = this.nextVersion(name);
-    const template = this.buildTemplate(name, state, triggersMap, skillsDetail, version);
+    const template = this.buildTemplate(name, state, triggersMap, skillsDetail, version, opts);
     const saved_to = this.writer.saveTemplate(template, `${name.toLowerCase().replace(/\s+/g, '-')}.yaml`);
     return { saved_to, version };
   }
@@ -106,6 +106,7 @@ export class ExportEngine {
     triggersMap: Map<string, TemplateAutopilotTrigger[]>,
     skillsDetail?: Map<string, MulticaSkillDetail>,
     version?: string,
+    opts?: ExportOptions,
   ): Template {
     const runtimeProviderMap = new Map<string, string>();
     for (const r of state.runtimes) {
@@ -114,13 +115,16 @@ export class ExportEngine {
 
     // Build template skill definitions (with files) from fetched details
     const templateSkills: TemplateSkill[] = [];
-    const skillIdForDetail = new Map<string, string>(); // skill ID → skill name (for dedup)
+    const skillIdForDetail = new Map<string, string>();
     if (skillsDetail) {
       for (const [id, detail] of skillsDetail) {
         skillIdForDetail.set(id, detail.name);
-        const files: TemplateSkillFile[] | undefined = detail.files?.length
+        // Skills may have files[] or a single content field
+        const files: TemplateSkillFile[] | undefined = (detail.files?.length
           ? detail.files.map((f) => ({ path: f.path, content: f.content }))
-          : undefined;
+          : detail.content
+            ? [{ path: 'SKILL.md', content: detail.content }]
+            : undefined);
         templateSkills.push({
           name: detail.name,
           description: detail.description,
@@ -163,22 +167,28 @@ export class ExportEngine {
       };
     });
 
+    const include = opts || { agents: true, autopilots: true, skills: true, projects: false, labels: false };
+
     return {
       version: version || '1.0',
       name,
       description: `Exported from Multica workspace`,
-      agents,
-      ...(templateSkills.length > 0 ? { skills: templateSkills } : {}),
-      projects: state.projects.map((p) => ({
-        title: p.title,
-        description: p.description || '',
-        status: p.status,
-      })),
-      labels: state.labels.map((l) => ({
-        name: l.name,
-        color: l.color,
-      })),
-      autopilots,
+      agents: include.agents !== false ? agents : [],
+      ...(include.skills !== false && templateSkills.length > 0 ? { skills: templateSkills } : {}),
+      projects: include.projects === true
+        ? state.projects.map((p) => ({
+            title: p.title,
+            description: p.description || '',
+            status: p.status,
+          }))
+        : [],
+      labels: include.labels === true
+        ? state.labels.map((l) => ({
+            name: l.name,
+            color: l.color,
+          }))
+        : [],
+      autopilots: include.autopilots !== false ? autopilots : [],
       runtime_mapping: {
         claude: { display_name: 'Claude' },
         cursor: { display_name: 'Cursor' },

@@ -37,6 +37,7 @@ export interface MulticaSkill {
 }
 
 export interface MulticaSkillDetail extends MulticaSkill {
+  content?: string;
   files?: MulticaSkillFile[];
 }
 

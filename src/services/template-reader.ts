@@ -48,9 +48,9 @@ export class TemplateReader {
         version: t.version,
         description: t.description,
         agent_count: t.agents.length,
-        project_count: t.projects.length,
-        label_count: t.labels.length,
-        autopilot_count: t.autopilots.length,
+        project_count: t.projects?.length ?? 0,
+        label_count: t.labels?.length ?? 0,
+        autopilot_count: t.autopilots?.length ?? 0,
         skill_count: t.skills?.length ?? 0,
       };
     });
@@ -58,11 +58,24 @@ export class TemplateReader {
 
   private readFrom(dir: string, name: string): Template {
     let content: string | null = null;
+    let foundName = name;
     for (const ext of ['.yaml', '.yml']) {
       const p = join(dir, `${name}${ext}`);
       if (existsSync(p)) {
         content = readFileSync(p, 'utf-8');
         break;
+      }
+    }
+    // Fall back to case-insensitive file name match
+    if (!content && existsSync(dir)) {
+      const files = readdirSync(dir);
+      const match = files.find((f) => {
+        const base = f.replace(/\.ya?ml$/, '');
+        return base.toLowerCase() === name.toLowerCase();
+      });
+      if (match) {
+        content = readFileSync(join(dir, match), 'utf-8');
+        foundName = match.replace(/\.ya?ml$/, '');
       }
     }
     if (!content) {
@@ -76,7 +89,6 @@ export class TemplateReader {
   private validate(t: Template, name: string): void {
     if (!t.version) throw new Error(`Template "${name}" missing version`);
     if (!t.agents?.length) throw new Error(`Template "${name}" has no agents`);
-    if (!t.projects?.length) throw new Error(`Template "${name}" has no projects`);
 
     const agentNames = new Set(t.agents.map((a) => a.name));
     for (const ap of t.autopilots || []) {

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { useApi, Workspace, TemplateSummary, TemplateDetail, RuntimeInfo } from '../hooks/useApi.js';
 
 interface Props {
@@ -20,6 +20,12 @@ export function ImportWizard({ api }: Props) {
   const [dryRun, setDryRun] = useState<any>(null);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<Record<string, { current: number; total: number; action: string; item: string }>>({});
+  const [envVars, setEnvVars] = useState<Record<string, string>>({});
+  const [envTemplate, setEnvTemplate] = useState<Record<string, string>>({});
+
+  const apiRef = useRef(api);
+  apiRef.current = api;
 
   // Step 1: select workspace
   const selectWorkspace = useCallback(
@@ -27,9 +33,9 @@ export function ImportWizard({ api }: Props) {
       setWs(w);
       setTemplates([]);
       setStep('template');
-      api.fetchTemplates().then(setTemplates);
+      apiRef.current.fetchTemplates().then(setTemplates);
     },
-    [api],
+    [],
   );
 
   // Step 2: select template
@@ -39,11 +45,11 @@ export function ImportWizard({ api }: Props) {
       setTemplateName(name);
       setError(null);
       try {
-        const t = await api.fetchTemplate(name);
+        const t = await apiRef.current.fetchTemplate(name);
         setTemplate(t);
         setStep('runtime');
         if (ws) {
-          const rs = await api.fetchRuntimes(ws.id);
+          const rs = await apiRef.current.fetchRuntimes(ws.id);
           setRuntimes(rs);
           // Pre-fill runtime map based on provider match
           const initialMap: Record<string, string> = {};
@@ -52,13 +58,36 @@ export function ImportWizard({ api }: Props) {
             initialMap[agent.name] = match?.id || '';
           }
           setRuntimeMap(initialMap);
+
+          // Collect all env var templates from agents and auto-resolve from global secrets
+          const allEnv: Record<string, string> = {};
+          for (const agent of t.agents) {
+            if (agent.custom_env_template) {
+              Object.assign(allEnv, agent.custom_env_template);
+            }
+          }
+          setEnvTemplate(allEnv);
+
+          if (Object.keys(allEnv).length > 0) {
+            try {
+              const resolved = await apiRef.current.resolveSecrets(allEnv);
+              // Merge: global secret values take priority
+              const initial: Record<string, string> = { ...allEnv };
+              for (const key of Object.keys(resolved)) {
+                if (resolved[key]) initial[key] = resolved[key];
+              }
+              setEnvVars(initial);
+            } catch {
+              setEnvVars(allEnv);
+            }
+          }
         }
       } catch (e: any) {
         setError(e.message);
       }
       setLoading(false);
     },
-    [api, ws],
+    [ws],
   );
 
   // Step 3: backfill
@@ -73,23 +102,25 @@ export function ImportWizard({ api }: Props) {
         runtime_id: runtimeMap[a.name] || '',
         runtime_name: runtimes.find((r) => r.id === runtimeMap[a.name])?.name || '',
       }));
-      const dr = await api.dryRunImport({
+      const dr = await apiRef.current.dryRunImport({
         template_name: templateName,
         workspace_id: ws.id,
         runtime_map: map,
         mode,
+        env_vars: envVars,
       });
       setDryRun(dr);
     } catch (e: any) {
       setError(e.message);
     }
     setLoading(false);
-  }, [ws, templateName, template, runtimeMap, mode, api, runtimes]);
+  }, [ws, templateName, template, runtimeMap, mode, runtimes]);
 
   const doApply = useCallback(async () => {
     if (!ws || !templateName) return;
     setLoading(true);
     setError(null);
+    setProgress({});
     try {
       const map = template!.agents.map((a) => ({
         agent_name: a.name,
@@ -97,19 +128,22 @@ export function ImportWizard({ api }: Props) {
         runtime_id: runtimeMap[a.name] || '',
         runtime_name: runtimes.find((r) => r.id === runtimeMap[a.name])?.name || '',
       }));
-      const res = await api.applyImport({
-        template_name: templateName,
-        workspace_id: ws.id,
-        runtime_map: map,
-        mode,
-      });
+      const res = await apiRef.current.applyImport(
+        { template_name: templateName, workspace_id: ws.id, runtime_map: map, mode, env_vars: envVars },
+        (evt) => {
+          setProgress((p) => ({
+            ...p,
+            [evt.phase]: { current: evt.current, total: evt.total, action: evt.action, item: evt.item },
+          }));
+        },
+      );
       setResult(res);
       setStep('result');
     } catch (e: any) {
       setError(e.message);
     }
     setLoading(false);
-  }, [ws, templateName, template, runtimeMap, mode, api, runtimes]);
+  }, [ws, templateName, template, runtimeMap, mode, runtimes]);
 
   const reset = useCallback(() => {
     setStep('workspace');
@@ -200,6 +234,39 @@ export function ImportWizard({ api }: Props) {
             </tbody>
           </table>
 
+          {Object.keys(envTemplate).length > 0 && (
+            <>
+              <h3>Environment Variables</h3>
+              <p className="hint">Values pre-filled from global secrets. Replace <code>${'{KEY}'}</code> placeholders with real values.</p>
+              <table className="runtime-table">
+                <thead>
+                  <tr>
+                    <th>Variable</th>
+                    <th>Template Placeholder</th>
+                    <th>Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.keys(envTemplate).map((key) => (
+                    <tr key={key}>
+                      <td><code>{key}</code></td>
+                      <td><code style={{ fontSize: 11, color: 'var(--text2)' }}>{envTemplate[key]}</code></td>
+                      <td>
+                        <input
+                          className="env-input"
+                          type="text"
+                          value={envVars[key] || ''}
+                          onChange={(e) => setEnvVars((v) => ({ ...v, [key]: e.target.value }))}
+                          placeholder={envTemplate[key]}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+
           <h3>Import Mode</h3>
           <div className="mode-select">
             <label className={`mode-option ${mode === 'skip-existing' ? 'selected' : ''}`}>
@@ -244,6 +311,31 @@ export function ImportWizard({ api }: Props) {
               <button className="btn btn-primary" onClick={doApply} disabled={loading}>
                 {loading ? 'Applying...' : 'Apply Import'}
               </button>
+
+              {loading && Object.keys(progress).length > 0 && (
+                <div className="progress-panel" style={{ marginTop: 16 }}>
+                  <h3>Importing...</h3>
+                  {(['skills', 'labels', 'projects', 'agents', 'autopilots'] as const).map((phase) => {
+                    const p = progress[phase];
+                    if (!p) return null;
+                    const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 100;
+                    return (
+                      <div key={phase} className="progress-row">
+                        <div className="progress-header">
+                          <span className="progress-label">{phase.charAt(0).toUpperCase() + phase.slice(1)}</span>
+                          <span className="progress-count">{p.current} / {p.total}</span>
+                        </div>
+                        <div className="progress-bar-bg">
+                          <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="progress-item">
+                          <span className={`action-badge ${p.action}`}>{p.action}</span> {p.item}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -292,16 +384,19 @@ export function ImportWizard({ api }: Props) {
 }
 
 function WorkspaceList({ api, onSelect }: { api: ReturnType<typeof useApi>; onSelect: (w: Workspace) => void }) {
-  const [list, setList] = useState<Workspace[]>(api.workspaces);
-  const [loading, setLoading] = useState(list.length === 0);
+  const [list, setList] = useState<Workspace[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  if (loading) {
-    api.fetchWorkspaces()
+  const apiRef = useRef(api);
+  apiRef.current = api;
+
+  useEffect(() => {
+    apiRef.current.fetchWorkspaces()
       .then(setList)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }
+  }, []);
 
   if (error) return <div className="error-banner">{error}</div>;
   if (loading) return <div className="spinner" />;

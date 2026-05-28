@@ -80,7 +80,14 @@ export class ImportEngine {
     return result;
   }
 
-  async apply(opts: ImportOptions): Promise<ImportResult> {
+  async apply(
+    opts: ImportOptions,
+    onProgress?: (evt: { phase: string; current: number; total: number; item: string; action: string; errors: string[] }) => void,
+  ): Promise<ImportResult> {
+    const emit = (phase: string, current: number, total: number, item: string, action: string) => {
+      onProgress?.({ phase, current, total, item, action, errors: [] });
+    };
+
     const template = this.reader.readTemplate(opts.template_name);
     const existing = await this.scanner.scanWorkspace(opts.workspace_id);
 
@@ -98,6 +105,19 @@ export class ImportEngine {
       runtimeMap.set(rm.runtime_provider, rm.runtime_id);
     }
 
+    const envOverrides: Record<string, string> = opts.env_vars || {};
+
+    // Resolve env: use user-supplied value if non-empty, otherwise keep template placeholder
+    function resolveEnv(template?: Record<string, string>): Record<string, string> | undefined {
+      if (!template || Object.keys(template).length === 0) return undefined;
+      const env: Record<string, string> = {};
+      for (const key of Object.keys(template)) {
+        const userVal = envOverrides[key];
+        env[key] = (userVal && userVal !== '' && !userVal.startsWith('${')) ? userVal : template[key];
+      }
+      return Object.keys(env).length > 0 ? env : undefined;
+    }
+
     try {
       // 0. Skills (no dependencies)
       const skillNameToId = new Map<string, string>(); // skill name → multica skill ID
@@ -107,14 +127,18 @@ export class ImportEngine {
       }
 
       for (const skill of template.skills || []) {
+        const idx = result.created.skills + result.skipped.skills;
+        const total = (template.skills || []).length;
         const existingId = existingSkillNameToId.get(skill.name);
         if (existingId) {
           skillNameToId.set(skill.name, existingId);
           result.skipped.skills++;
+          emit('skills', idx + 1, total, skill.name, 'skip');
           continue;
         }
         try {
-          const mainContent = skill.files?.find((f) => f.path === 'index.ts' || f.path === 'index.js' || f.path === 'main.ts' || f.path === 'main.js')?.content || '';
+          const mainContent = skill.files?.find((f) => f.path === 'index.ts' || f.path === 'index.js' || f.path === 'main.ts' || f.path === 'main.js')?.content
+            || skill.files?.[0]?.content || '';
           const config = skill.config ? JSON.stringify(skill.config) : undefined;
           const created = await cli.createSkill(opts.workspace_id, {
             name: skill.name,
@@ -136,31 +160,37 @@ export class ImportEngine {
           }
 
           result.created.skills++;
+          emit('skills', idx + 1, total, skill.name, 'create');
         } catch (err: any) {
           result.errors.push(`Failed to create skill "${skill.name}": ${err.message}`);
         }
       }
 
       // 1. Labels (no dependencies)
-      for (const label of template.labels) {
+      for (let i = 0; i < template.labels.length; i++) {
+        const label = template.labels[i];
         const exists = existing.labels.find((l) => l.name === label.name);
         if (exists) {
           result.skipped.labels++;
+          emit('labels', i + 1, template.labels.length, label.name, 'skip');
           continue;
         }
         try {
           await cli.createLabel(opts.workspace_id, { name: label.name, color: label.color });
           result.created.labels++;
+          emit('labels', i + 1, template.labels.length, label.name, 'create');
         } catch (err: any) {
           result.errors.push(`Failed to create label "${label.name}": ${err.message}`);
         }
       }
 
       // 2. Projects (no dependencies)
-      for (const project of template.projects) {
+      for (let i = 0; i < template.projects.length; i++) {
+        const project = template.projects[i];
         const exists = existing.projects.find((p) => p.title === project.title);
         if (exists) {
           result.skipped.projects++;
+          emit('projects', i + 1, template.projects.length, project.title, 'skip');
           continue;
         }
         try {
@@ -170,14 +200,16 @@ export class ImportEngine {
             status: project.status,
           });
           result.created.projects++;
+          emit('projects', i + 1, template.projects.length, project.title, 'create');
         } catch (err: any) {
           result.errors.push(`Failed to create project "${project.title}": ${err.message}`);
         }
       }
 
-      // 3. Agents (no cross-dependencies, can parallelize)
-      const agentIdMap = new Map<string, string>(); // agentName → multica agent ID
-      for (const agent of template.agents) {
+      // 3. Agents
+      const agentIdMap = new Map<string, string>();
+      for (let i = 0; i < template.agents.length; i++) {
+        const agent = template.agents[i];
         const existingAgent = existing.agents.find((a) => a.name === agent.name);
 
         if (existingAgent) {
@@ -185,7 +217,7 @@ export class ImportEngine {
           if (opts.mode === 'force-overwrite') {
             try {
               const runtimeId = runtimeMap.get(agent.runtime_provider) || existingAgent.runtime_id;
-              const env = this.resolveEnv(agent.custom_env_template);
+              const env = resolveEnv(agent.custom_env_template);
               await cli.updateAgent(existingAgent.id, {
                 description: agent.description,
                 instructions: agent.instructions,
@@ -194,11 +226,13 @@ export class ImportEngine {
                 customEnv: env,
               });
               result.updated.agents++;
+              emit('agents', i + 1, template.agents.length, agent.name, 'update');
             } catch (err: any) {
               result.errors.push(`Failed to update agent "${agent.name}": ${err.message}`);
             }
           } else {
             result.skipped.agents++;
+            emit('agents', i + 1, template.agents.length, agent.name, 'skip');
           }
 
           // Assign skills to existing agent if template has skills
@@ -223,11 +257,12 @@ export class ImportEngine {
         if (!runtimeId) {
           result.errors.push(`No runtime mapped for agent "${agent.name}" (provider: ${agent.runtime_provider})`);
           result.skipped.agents++;
+          emit('agents', i + 1, template.agents.length, agent.name, 'skip');
           continue;
         }
 
         try {
-          const env = this.resolveEnv(agent.custom_env_template);
+          const env = resolveEnv(agent.custom_env_template);
           const created = await cli.createAgent(opts.workspace_id, {
             name: agent.name,
             description: agent.description,
@@ -254,16 +289,19 @@ export class ImportEngine {
           }
 
           result.created.agents++;
+          emit('agents', i + 1, template.agents.length, agent.name, 'create');
         } catch (err: any) {
           result.errors.push(`Failed to create agent "${agent.name}": ${err.message}`);
         }
       }
 
-      // 4. Autopilots (depend on agents) + triggers (depend on autopilots)
-      for (const ap of template.autopilots) {
+      // 4. Autopilots
+      for (let i = 0; i < template.autopilots.length; i++) {
+        const ap = template.autopilots[i];
         const exists = existing.autopilots.find((a) => a.title === ap.title);
         if (exists) {
           result.skipped.autopilots++;
+          emit('autopilots', i + 1, template.autopilots.length, ap.title, 'skip');
           // Check if existing autopilot is missing any triggers from template
           if (ap.triggers && ap.triggers.length > 0) {
             try {
@@ -299,6 +337,7 @@ export class ImportEngine {
             mode: ap.mode,
           });
           result.created.autopilots++;
+          emit('autopilots', i + 1, template.autopilots.length, ap.title, 'create');
 
           // Create triggers if defined in template
           if (ap.triggers && ap.triggers.length > 0) {
@@ -323,21 +362,5 @@ export class ImportEngine {
     }
 
     return result;
-  }
-
-  private resolveEnv(template?: Record<string, string>): Record<string, string> | undefined {
-    if (!template || Object.keys(template).length === 0) return undefined;
-    const resolved: Record<string, string> = {};
-    for (const [key, value] of Object.entries(template)) {
-      if (value.startsWith('${') && value.endsWith('}')) {
-        const envVal = process.env[key];
-        if (envVal) {
-          resolved[key] = envVal;
-        }
-      } else {
-        resolved[key] = value;
-      }
-    }
-    return Object.keys(resolved).length > 0 ? resolved : undefined;
   }
 }

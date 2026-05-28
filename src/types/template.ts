@@ -79,6 +79,7 @@ export interface ImportOptions {
   workspace_id: string;
   runtime_map: RuntimeMapAssignment[];
   mode: ImportMode;
+  env_vars?: Record<string, string>;
 }
 
 export interface DryRunItem {
@@ -102,6 +103,22 @@ export interface ImportResult {
   updated: { agents: number };
   errors: string[];
 }
+
+export interface ExportOptions {
+  agents: boolean;
+  autopilots: boolean;
+  skills: boolean;
+  projects: boolean;
+  labels: boolean;
+}
+
+export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
+  agents: true,
+  autopilots: true,
+  skills: true,
+  projects: false,
+  labels: false,
+};
 
 export interface TemplateSummary {
   name: string;

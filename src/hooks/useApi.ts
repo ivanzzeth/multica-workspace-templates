@@ -48,6 +48,8 @@ export interface TemplateAgent {
   runtime_provider: string;
   model: string;
   skills?: string[];
+  custom_env_template?: Record<string, string>;
+  custom_args?: string[];
 }
 
 export interface TemplateProject {
@@ -104,6 +106,24 @@ export interface ImportResult {
   errors: string[];
 }
 
+export interface ServerProfile {
+  id: string;
+  name: string;
+  server_url: string;
+  app_url: string;
+  token: string;
+  workspace_id: string;
+  is_default: boolean;
+}
+
+export interface ExportOptions {
+  agents: boolean;
+  autopilots: boolean;
+  skills: boolean;
+  projects: boolean;
+  labels: boolean;
+}
+
 // ── API Hook ──
 
 export function useApi() {
@@ -144,6 +164,7 @@ export function useApi() {
       workspace_id: string;
       runtime_map: { agent_name: string; runtime_provider: string; runtime_id: string; runtime_name: string }[];
       mode: string;
+      env_vars?: Record<string, string>;
     }) => {
       const res = await fetch('/api/import/dry-run', {
         method: 'POST',
@@ -156,42 +177,165 @@ export function useApi() {
     [],
   );
 
+  type ProgressCallback = (evt: {
+    phase: string;
+    current: number;
+    total: number;
+    item: string;
+    action: string;
+    errors: string[];
+  }) => void;
+
   const applyImport = useCallback(
-    async (opts: {
-      template_name: string;
-      workspace_id: string;
-      runtime_map: { agent_name: string; runtime_provider: string; runtime_id: string; runtime_name: string }[];
-      mode: string;
-    }) => {
+    async (
+      opts: {
+        template_name: string;
+        workspace_id: string;
+        runtime_map: { agent_name: string; runtime_provider: string; runtime_id: string; runtime_name: string }[];
+        mode: string;
+        env_vars?: Record<string, string>;
+      },
+      onProgress?: ProgressCallback,
+    ): Promise<ImportResult> => {
       const res = await fetch('/api/import/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(opts),
       });
-      const data = await res.json();
-      return data.result as ImportResult;
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error);
+      }
+
+      // Read NDJSON stream
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let finalResult: ImportResult | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const json = JSON.parse(line);
+            if (json.done) {
+              finalResult = json.result;
+            } else if (json.error) {
+              throw new Error(json.error);
+            } else if (onProgress) {
+              onProgress(json);
+            }
+          } catch (e: any) {
+            if (e instanceof SyntaxError) continue;
+            throw e;
+          }
+        }
+      }
+
+      if (!finalResult) throw new Error('No result received');
+      return finalResult;
     },
     [],
   );
 
-  const exportPreview = useCallback(async (workspaceId: string) => {
+  const exportPreview = useCallback(async (workspaceId: string, options?: ExportOptions) => {
     const res = await fetch('/api/export/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace_id: workspaceId }),
+      body: JSON.stringify({ workspace_id: workspaceId, options }),
     });
     const data = await res.json();
     return data.template as TemplateDetail;
   }, []);
 
-  const exportApply = useCallback(async (workspaceId: string, name: string) => {
+  const exportApply = useCallback(async (workspaceId: string, name: string, options?: ExportOptions) => {
     const res = await fetch('/api/export/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workspace_id: workspaceId, name }),
+      body: JSON.stringify({ workspace_id: workspaceId, name, options }),
     });
     const data = await res.json();
     return data as { saved_to: string; version: string };
+  }, []);
+
+  // ── Servers ──
+
+  const fetchServers = useCallback(async () => {
+    const res = await fetch('/api/servers');
+    const data = await res.json();
+    return data as { servers: ServerProfile[]; current: ServerProfile | null };
+  }, []);
+
+  const addServer = useCallback(async (input: {
+    name: string;
+    server_url: string;
+    app_url?: string;
+    token: string;
+    workspace_id?: string;
+  }) => {
+    const res = await fetch('/api/servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    const data = await res.json();
+    if (res.ok) return data.server as ServerProfile;
+    throw new Error(data.error);
+  }, []);
+
+  const removeServer = useCallback(async (id: string) => {
+    const res = await fetch(`/api/servers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+  }, []);
+
+  const switchServer = useCallback(async (id: string) => {
+    const res = await fetch(`/api/servers/${encodeURIComponent(id)}/switch`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.server as ServerProfile;
+  }, []);
+
+  // ── Secrets ──
+
+  const fetchSecrets = useCallback(async () => {
+    const res = await fetch('/api/secrets');
+    const data = await res.json();
+    return data.secrets as Record<string, string>;
+  }, []);
+
+  const setSecret = useCallback(async (key: string, value: string) => {
+    const res = await fetch('/api/secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+  }, []);
+
+  const deleteSecret = useCallback(async (key: string) => {
+    const res = await fetch(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+  }, []);
+
+  const resolveSecrets = useCallback(async (env: Record<string, string>) => {
+    const res = await fetch('/api/secrets/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ env }),
+    });
+    const data = await res.json();
+    return data.resolved as Record<string, string>;
   }, []);
 
   return {
@@ -206,6 +350,14 @@ export function useApi() {
     applyImport,
     exportPreview,
     exportApply,
+    fetchServers,
+    addServer,
+    removeServer,
+    switchServer,
+    fetchSecrets,
+    setSecret,
+    deleteSecret,
+    resolveSecrets,
   };
 }
 
