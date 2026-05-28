@@ -11,6 +11,7 @@ import type {
   MulticaAutopilotDetail,
   MulticaSkill,
   MulticaSkillDetail,
+  MulticaProjectResource,
 } from '../types/multica.js';
 
 const exec = promisify(execFile);
@@ -281,6 +282,42 @@ export async function addAutopilotTrigger(
 
 export async function getWorkspaceConfig() {
   return loadConfig();
+}
+
+// ── Project Resources (via HTTP API — no CLI command available) ──
+
+async function projectApi(workspaceId: string, path: string, init?: RequestInit): Promise<any> {
+  const config = loadConfig();
+  const url = `${config.server_url}${path}?workspace_id=${encodeURIComponent(workspaceId)}`;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Authorization': `Bearer ${config.token}`,
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listProjectResources(projectId: string, workspaceId: string): Promise<MulticaProjectResource[]> {
+  const data = await projectApi(workspaceId, `/api/projects/${projectId}/resources`);
+  return data.resources as MulticaProjectResource[];
+}
+
+export async function createProjectResource(projectId: string, workspaceId: string, opts: {
+  resource_type: string;
+  resource_ref: Record<string, any>;
+}): Promise<{ id: string }> {
+  const data = await projectApi(workspaceId, `/api/projects/${projectId}/resources`, {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
+  return data as { id: string };
 }
 
 // ── Skills ──

@@ -64,6 +64,16 @@ export interface MulticaProject {
   icon: string | null;
 }
 
+export interface MulticaProjectResource {
+  id: string;
+  project_id: string;
+  workspace_id: string;
+  resource_type: string;
+  resource_ref: Record<string, any>;
+  label: string | null;
+  position: number;
+}
+
 export interface MulticaLabel {
   id: string;
   name: string;

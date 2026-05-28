@@ -198,6 +198,21 @@ export class ImportEngine {
         }
       }
 
+      // Helper: create resources for an existing project that's missing them
+      async function createResourcesIfMissing(
+        projectId: string,
+        resources: { resource_type: string; resource_ref: Record<string, any> }[],
+        result: ImportResult,
+      ) {
+        for (const res of resources) {
+          try {
+            await cli.createProjectResource(projectId, opts.workspace_id, res);
+          } catch (err: any) {
+            result.errors.push(`Failed to create resource "${res.resource_type}": ${err.message}`);
+          }
+        }
+      }
+
       // 2. Projects (no dependencies)
       for (let i = 0; i < template.projects.length; i++) {
         const project = template.projects[i];
@@ -205,16 +220,31 @@ export class ImportEngine {
         if (exists) {
           result.skipped.projects++;
           emit('projects', i + 1, template.projects.length, project.title, 'skip');
+          // Still create resources for existing projects if they have none
+          if (project.resources?.length) {
+            await createResourcesIfMissing(exists.id, project.resources, result);
+          }
           continue;
         }
         try {
-          await cli.createProject(opts.workspace_id, {
+          const created = await cli.createProject(opts.workspace_id, {
             title: project.title,
             description: project.description,
             status: project.status,
           });
           result.created.projects++;
           emit('projects', i + 1, template.projects.length, project.title, 'create');
+
+          // Create project resources
+          if (project.resources?.length) {
+            for (const res of project.resources) {
+              try {
+                await cli.createProjectResource(created.id, opts.workspace_id, res);
+              } catch (err: any) {
+                result.errors.push(`Failed to create resource "${res.resource_type}" for project "${project.title}": ${err.message}`);
+              }
+            }
+          }
         } catch (err: any) {
           result.errors.push(`Failed to create project "${project.title}": ${err.message}`);
         }

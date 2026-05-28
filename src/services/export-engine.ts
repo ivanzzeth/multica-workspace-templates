@@ -176,11 +176,17 @@ export class ExportEngine {
       agents: include.agents !== false ? agents : [],
       ...(include.skills !== false && templateSkills.length > 0 ? { skills: templateSkills } : {}),
       projects: include.projects === true
-        ? state.projects.map((p) => ({
-            title: p.title,
-            description: p.description || '',
-            status: p.status,
-          }))
+        ? state.projects.map((p) => {
+            const resources = state.projectResources.get(p.id);
+            return {
+              title: p.title,
+              description: p.description || '',
+              status: p.status,
+              ...(resources?.length
+                ? { resources: resources.map((r) => ({ resource_type: r.resource_type, resource_ref: r.resource_ref })) }
+                : {}),
+            };
+          })
         : [],
       labels: include.labels === true
         ? state.labels.map((l) => ({

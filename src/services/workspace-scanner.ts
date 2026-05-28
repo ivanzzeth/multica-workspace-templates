@@ -6,6 +6,7 @@ import type {
   MulticaAutopilot,
   MulticaRuntime,
   MulticaSkill,
+  MulticaProjectResource,
 } from '../types/multica.js';
 
 export interface WorkspaceState {
@@ -15,6 +16,7 @@ export interface WorkspaceState {
   autopilots: MulticaAutopilot[];
   runtimes: MulticaRuntime[];
   skills: MulticaSkill[];
+  projectResources: Map<string, MulticaProjectResource[]>;
 }
 
 export class WorkspaceScanner {
@@ -28,6 +30,18 @@ export class WorkspaceScanner {
       cli.listSkills(workspaceId),
     ]);
 
-    return { agents, projects, labels, autopilots, runtimes, skills };
+    // Fetch resources for each project (in parallel)
+    const projectResources = new Map<string, MulticaProjectResource[]>();
+    const resourceResults = await Promise.allSettled(
+      projects.map((p) => cli.listProjectResources(p.id, workspaceId)),
+    );
+    for (let i = 0; i < projects.length; i++) {
+      const result = resourceResults[i];
+      if (result.status === 'fulfilled' && result.value.length > 0) {
+        projectResources.set(projects[i].id, result.value);
+      }
+    }
+
+    return { agents, projects, labels, autopilots, runtimes, skills, projectResources };
   }
 }
