@@ -147,6 +147,7 @@ export class ExportEngine {
         instructions: a.instructions,
         model: a.model,
         runtime_provider: runtimeProviderMap.get(a.runtime_id) || 'unknown',
+        ...(a.visibility && a.visibility !== 'private' ? { visibility: a.visibility } : {}),
         custom_args: a.custom_args?.length ? a.custom_args : undefined,
         custom_env_template: this.sanitizeEnv(a.custom_env),
         ...(agentSkillNames?.length ? { skills: agentSkillNames } : {}),

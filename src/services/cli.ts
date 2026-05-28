@@ -148,6 +148,7 @@ export interface AgentCreateOpts {
   instructions: string;
   runtimeId: string;
   model?: string;
+  visibility?: string;
   customArgs?: string[];
   customEnv?: Record<string, string>;
 }
@@ -163,6 +164,9 @@ export async function createAgent(workspaceId: string, opts: AgentCreateOpts): P
   if (opts.model) {
     args.push('--model', opts.model);
   }
+  if (opts.visibility) {
+    args.push('--visibility', opts.visibility);
+  }
   if (opts.customArgs && opts.customArgs.length > 0) {
     args.push('--custom-args', JSON.stringify(opts.customArgs));
   }
@@ -177,6 +181,7 @@ export interface AgentUpdateOpts {
   description?: string;
   instructions?: string;
   model?: string;
+  visibility?: string;
   customArgs?: string[];
   maxConcurrentTasks?: number;
   mcpConfig?: string;
@@ -189,6 +194,7 @@ export async function updateAgent(agentId: string, opts: AgentUpdateOpts, worksp
   if (opts.description) args.push('--description', opts.description);
   if (opts.instructions) args.push('--instructions', opts.instructions);
   if (opts.model !== undefined) args.push('--model', opts.model);
+  if (opts.visibility) args.push('--visibility', opts.visibility);
   if (opts.customArgs) args.push('--custom-args', JSON.stringify(opts.customArgs));
   if (opts.maxConcurrentTasks !== undefined) args.push('--max-concurrent-tasks', String(opts.maxConcurrentTasks));
   if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig);

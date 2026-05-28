@@ -267,6 +267,7 @@ export class ImportEngine {
                 description: agent.description,
                 instructions: agent.instructions,
                 model: agent.model || undefined,
+                visibility: agent.visibility,
                 customArgs: args,
               }, opts.workspace_id);
               if (env) {
@@ -317,6 +318,7 @@ export class ImportEngine {
             instructions: agent.instructions,
             runtimeId,
             model: agent.model || undefined,
+            visibility: agent.visibility,
             customArgs: args,
             customEnv: env,
           });

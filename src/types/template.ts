@@ -16,6 +16,7 @@ export interface TemplateAgent {
   instructions: string;
   model: string;
   runtime_provider: string;
+  visibility?: string;
   custom_args?: string[];
   custom_env_template?: Record<string, string>;
   skills?: string[];

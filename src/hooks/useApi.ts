@@ -48,6 +48,7 @@ export interface TemplateAgent {
   description: string;
   runtime_provider: string;
   model: string;
+  visibility?: string;
   skills?: string[];
   custom_env_template?: Record<string, string>;
   custom_args?: string[];
