@@ -41,20 +41,27 @@ export class TemplateReader {
   private listFrom(dir: string, source: 'builtin' | 'user'): TemplateSummary[] {
     if (!existsSync(dir)) return [];
     const files = readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
-    return files.map((f) => {
-      const t = this.readFrom(dir, f.replace(/\.ya?ml$/, ''));
-      return {
-        name: t.name,
-        version: t.version,
-        description: t.description,
-        agent_count: t.agents.length,
-        project_count: t.projects?.length ?? 0,
-        label_count: t.labels?.length ?? 0,
-        autopilot_count: t.autopilots?.length ?? 0,
-        skill_count: t.skills?.length ?? 0,
-        source,
-      };
-    });
+    const results: TemplateSummary[] = [];
+    for (const f of files) {
+      try {
+        const name = f.replace(/\.ya?ml$/, '');
+        const t = this.readFrom(dir, name);
+        results.push({
+          name: t.name,
+          version: t.version,
+          description: t.description,
+          agent_count: t.agents.length,
+          project_count: t.projects?.length ?? 0,
+          label_count: t.labels?.length ?? 0,
+          autopilot_count: t.autopilots?.length ?? 0,
+          skill_count: t.skills?.length ?? 0,
+          source,
+        });
+      } catch {
+        // Skip invalid templates without breaking the whole list
+      }
+    }
+    return results;
   }
 
   private readFrom(dir: string, name: string): Template {
