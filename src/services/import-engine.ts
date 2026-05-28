@@ -238,7 +238,7 @@ export class ImportEngine {
                 instructions: agent.instructions,
                 model: agent.model || undefined,
                 customArgs: args,
-              });
+              }, opts.workspace_id);
               if (env) {
                 await cli.setAgentEnv(existingAgent.id, env, opts.workspace_id);
               }

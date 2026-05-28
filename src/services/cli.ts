@@ -182,7 +182,7 @@ export interface AgentUpdateOpts {
   runtimeConfig?: string;
 }
 
-export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promise<void> {
+export async function updateAgent(agentId: string, opts: AgentUpdateOpts, workspaceId: string): Promise<void> {
   const args = ['agent', 'update', agentId];
   if (opts.name) args.push('--name', opts.name);
   if (opts.description) args.push('--description', opts.description);
@@ -192,7 +192,7 @@ export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promi
   if (opts.maxConcurrentTasks !== undefined) args.push('--max-concurrent-tasks', String(opts.maxConcurrentTasks));
   if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig);
   if (opts.runtimeConfig) args.push('--runtime-config', opts.runtimeConfig);
-  await runMultica(args);
+  await runMultica(args, { workspaceId });
 }
 
 export async function setAgentEnv(agentId: string, env: Record<string, string>, workspaceId: string): Promise<void> {
