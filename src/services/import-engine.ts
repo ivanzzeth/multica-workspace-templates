@@ -238,8 +238,10 @@ export class ImportEngine {
                 instructions: agent.instructions,
                 model: agent.model || undefined,
                 customArgs: args,
-                customEnv: env,
               });
+              if (env) {
+                await cli.setAgentEnv(existingAgent.id, env, opts.workspace_id);
+              }
               result.updated.agents++;
               emit('agents', i + 1, template.agents.length, agent.name, 'update');
             } catch (err: any) {

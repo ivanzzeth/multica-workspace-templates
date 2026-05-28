@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { loadConfig } from '../config.js';
 import type {
@@ -36,12 +36,43 @@ function buildEnv(workspaceId?: string): Record<string, string> {
   return env;
 }
 
+interface ExecOptions {
+  env?: Record<string, string>;
+  stdin?: string;
+}
+
 async function runMultica<T = string>(
   args: string[],
   opts?: ExecOptions & { parseJson?: boolean; workspaceId?: string },
 ): Promise<T> {
   const path = await resolveMulticaPath();
   const env = opts?.env ?? buildEnv(opts?.workspaceId);
+
+  if (opts?.stdin !== undefined) {
+    // Use spawn for stdin support
+    return new Promise<T>((resolve, reject) => {
+      const child = spawn(path, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+      child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`Command failed: ${path} ${args.join(' ')}\n${stderr}`));
+          return;
+        }
+        try {
+          resolve(opts?.parseJson ? JSON.parse(stdout) as T : stdout.trim() as unknown as T);
+        } catch {
+          resolve(stdout.trim() as unknown as T);
+        }
+      });
+      child.stdin.write(opts.stdin);
+      child.stdin.end();
+    });
+  }
+
   const { stdout } = await exec(path, args, { env });
   if (opts?.parseJson) {
     return JSON.parse(stdout) as T;
@@ -146,7 +177,6 @@ export interface AgentUpdateOpts {
   instructions?: string;
   model?: string;
   customArgs?: string[];
-  customEnv?: Record<string, string>;
   maxConcurrentTasks?: number;
   mcpConfig?: string;
   runtimeConfig?: string;
@@ -159,11 +189,17 @@ export async function updateAgent(agentId: string, opts: AgentUpdateOpts): Promi
   if (opts.instructions) args.push('--instructions', opts.instructions);
   if (opts.model !== undefined) args.push('--model', opts.model);
   if (opts.customArgs) args.push('--custom-args', JSON.stringify(opts.customArgs));
-  if (opts.customEnv) args.push('--custom-env', JSON.stringify(opts.customEnv));
   if (opts.maxConcurrentTasks !== undefined) args.push('--max-concurrent-tasks', String(opts.maxConcurrentTasks));
   if (opts.mcpConfig) args.push('--mcp-config', opts.mcpConfig);
   if (opts.runtimeConfig) args.push('--runtime-config', opts.runtimeConfig);
   await runMultica(args);
+}
+
+export async function setAgentEnv(agentId: string, env: Record<string, string>, workspaceId: string): Promise<void> {
+  await runMultica(['agent', 'env', 'set', agentId, '--custom-env-stdin'], {
+    workspaceId,
+    stdin: JSON.stringify(env),
+  });
 }
 
 export interface ProjectCreateOpts {
