@@ -8,14 +8,35 @@ import './styles/app.css';
 
 type Page = 'import' | 'export' | 'templates' | 'settings';
 
+const PAGE_MAP: Record<string, Page> = {
+  '#templates': 'templates',
+  '#import': 'import',
+  '#export': 'export',
+  '#settings': 'settings',
+};
+
+function getPageFromHash(): Page {
+  return PAGE_MAP[location.hash] || 'templates';
+}
+
 export default function App() {
   const api = useApi();
-  const [page, setPage] = useState<Page>('import');
+  const [page, setPage] = useState<Page>(getPageFromHash);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [servers, setServers] = useState<ServerProfile[]>([]);
   const [currentServer, setCurrentServer] = useState<ServerProfile | null>(null);
   const [switching, setSwitching] = useState(false);
+
+  const navigate = useCallback((p: Page) => {
+    location.hash = `#${p}`;
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => setPage(getPageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const apiRef = useRef(api);
   apiRef.current = api;
@@ -77,16 +98,16 @@ export default function App() {
       <header className="header">
         <h1>Multica Template Manager</h1>
         <nav className="nav">
-          <button className={`nav-btn ${page === 'templates' ? 'active' : ''}`} onClick={() => setPage('templates')}>
+          <button className={`nav-btn ${page === 'templates' ? 'active' : ''}`} onClick={() => navigate('templates')}>
             Templates
           </button>
-          <button className={`nav-btn ${page === 'import' ? 'active' : ''}`} onClick={() => setPage('import')}>
+          <button className={`nav-btn ${page === 'import' ? 'active' : ''}`} onClick={() => navigate('import')}>
             Import
           </button>
-          <button className={`nav-btn ${page === 'export' ? 'active' : ''}`} onClick={() => setPage('export')}>
+          <button className={`nav-btn ${page === 'export' ? 'active' : ''}`} onClick={() => navigate('export')}>
             Export
           </button>
-          <button className={`nav-btn ${page === 'settings' ? 'active' : ''}`} onClick={() => setPage('settings')}>
+          <button className={`nav-btn ${page === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}>
             Settings
           </button>
         </nav>
