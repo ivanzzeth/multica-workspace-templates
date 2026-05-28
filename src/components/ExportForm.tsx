@@ -152,7 +152,21 @@ export function ExportForm({ api }: Props) {
           {preview.projects.length > 0 && (
             <>
               <h3>Projects</h3>
-              <ProjectLabelList items={preview.projects.map((p) => ({ name: p.title, detail: p.status }))} />
+              {preview.projects.map((p) => (
+                <div key={p.title} className="dry-item" style={{ display: 'block', padding: '8px 12px', marginBottom: 6 }}>
+                  <strong style={{ fontSize: 13 }}>{p.title}</strong>
+                  <span className="reason" style={{ fontSize: 11 }}>{p.status}</span>
+                  {p.resources && p.resources.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      {p.resources.map((r: any, i: number) => (
+                        <span key={i} className="dry-item" style={{ fontSize: 10, padding: '2px 6px', background: 'transparent', borderLeft: '2px solid var(--accent)' }}>
+                          {r.resource_type === 'github_repo' ? '🔗' : '📎'} {r.resource_ref.url || r.resource_type}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </>
           )}
 

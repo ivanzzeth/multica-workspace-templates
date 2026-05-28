@@ -57,6 +57,10 @@ export interface TemplateProject {
   title: string;
   description: string;
   status: string;
+  resources?: {
+    resource_type: string;
+    resource_ref: Record<string, any>;
+  }[];
 }
 
 export interface TemplateLabel {

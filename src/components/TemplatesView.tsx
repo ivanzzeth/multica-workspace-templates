@@ -128,14 +128,25 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
       {template.projects.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           <h2>Projects</h2>
-          <div className="dry-run-items">
-            {template.projects.map((p) => (
-              <span key={p.title} className="dry-item">
-                {p.title}
-                <span className="reason">{p.status}</span>
-              </span>
-            ))}
-          </div>
+          {template.projects.map((p) => (
+            <div key={p.title} className="skill-card" style={{ marginBottom: 8 }}>
+              <strong>{p.title}</strong>
+              <span className="badge" style={{ marginLeft: 8, fontSize: 10 }}>{p.status}</span>
+              {p.description && <span className="reason" style={{ display: 'block', fontSize: 12, marginTop: 4 }}>{p.description}</span>}
+              {p.resources && p.resources.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.05em' }}>Resources</div>
+                  <div className="dry-run-items">
+                    {p.resources.map((r: any, i: number) => (
+                      <span key={i} className="dry-item" style={{ fontSize: 11, borderLeftColor: 'var(--accent)', borderLeftWidth: 2 }}>
+                        {r.resource_type === 'github_repo' ? '🔗' : '📎'} {r.resource_ref.url || r.resource_type}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
