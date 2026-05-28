@@ -22,8 +22,8 @@ export class TemplateReader {
   }
 
   listTemplates(): TemplateSummary[] {
-    const builtin = this.listFrom(this.builtinDir);
-    const user = this.listFrom(this.userDir);
+    const builtin = this.listFrom(this.builtinDir, 'builtin');
+    const user = this.listFrom(this.userDir, 'user');
     // User templates override built-in when names collide
     const userNames = new Set(user.map((t) => t.name));
     return [...builtin.filter((t) => !userNames.has(t.name)), ...user];
@@ -38,7 +38,7 @@ export class TemplateReader {
     }
   }
 
-  private listFrom(dir: string): TemplateSummary[] {
+  private listFrom(dir: string, source: 'builtin' | 'user'): TemplateSummary[] {
     if (!existsSync(dir)) return [];
     const files = readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
     return files.map((f) => {
@@ -52,6 +52,7 @@ export class TemplateReader {
         label_count: t.labels?.length ?? 0,
         autopilot_count: t.autopilots?.length ?? 0,
         skill_count: t.skills?.length ?? 0,
+        source,
       };
     });
   }

@@ -129,4 +129,5 @@ export interface TemplateSummary {
   label_count: number;
   autopilot_count: number;
   skill_count: number;
+  source: 'builtin' | 'user';
 }

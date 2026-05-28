@@ -55,7 +55,7 @@ export function TemplatesView({ api }: Props) {
       <p className="hint">{templates.length} template{templates.length > 1 ? 's' : ''} available. Click to view details.</p>
       {templates.map((t) => (
         <button key={t.name} className="template-card" onClick={() => openDetail(t.name)}>
-          <strong>{t.name} <span className="version-badge">v{t.version}</span></strong>
+          <strong>{t.name} <span className="version-badge">v{t.version}</span> <span className="source-badge">{t.source === 'user' ? 'local' : 'built-in'}</span></strong>
           <span className="desc">{t.description}</span>
           <span className="badges">
             <span>{t.agent_count} agents</span>
