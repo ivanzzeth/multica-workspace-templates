@@ -456,6 +456,8 @@ body {
   cursor: pointer;
 }
 .btn-small:hover { color: var(--text); border-color: var(--text2); }
+.btn-small-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn-small-active:hover { background: var(--accent-hover); color: #fff; }
 .file-block {
   margin-top: 6px;
   background: var(--bg);

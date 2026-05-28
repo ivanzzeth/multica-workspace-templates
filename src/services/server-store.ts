@@ -11,6 +11,7 @@ export interface ServerProfile {
   token: string;
   workspace_id: string;
   is_default: boolean;
+  secrets?: Record<string, string>;
 }
 
 export type ServerProfileInput = Omit<ServerProfile, 'id' | 'is_default' | 'app_url' | 'workspace_id'> & {
@@ -62,6 +63,11 @@ export class ServerStore {
     return readServers();
   }
 
+  get(id: string): ServerProfile | null {
+    const servers = this.list();
+    return servers.find((s) => s.id === id) || null;
+  }
+
   getCurrent(): ServerProfile | null {
     try {
       const config = loadConfig();
@@ -70,6 +76,25 @@ export class ServerStore {
     } catch {
       return null;
     }
+  }
+
+  updateSecrets(serverId: string, key: string, value: string) {
+    const servers = this.list();
+    const s = servers.find((s) => s.id === serverId);
+    if (!s) return;
+    if (!s.secrets) s.secrets = {};
+    s.secrets[key] = value;
+    writeServers(servers);
+  }
+
+  deleteSecret(serverId: string, key: string): boolean {
+    const servers = this.list();
+    const s = servers.find((s) => s.id === serverId);
+    if (!s?.secrets || !(key in s.secrets)) return false;
+    delete s.secrets[key];
+    if (Object.keys(s.secrets).length === 0) delete s.secrets;
+    writeServers(servers);
+    return true;
   }
 
   add(input: ServerProfileInput): ServerProfile {

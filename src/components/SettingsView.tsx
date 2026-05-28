@@ -158,31 +158,35 @@ export function SettingsView({ api, onServersChanged }: Props) {
         </div>
       )}
 
-      <SecretsPanel api={api} />
+      <SecretsPanel api={api} currentServer={current} />
     </div>
   );
 }
 
-function SecretsPanel({ api }: { api: ReturnType<typeof useApi> }) {
+function SecretsPanel({ api, currentServer }: { api: ReturnType<typeof useApi>; currentServer: ServerProfile | null }) {
   const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const [serverSecrets, setServerSecrets] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
+  const [scope, setScope] = useState<'global' | 'server'>('global');
 
   const apiRef = useRef(api);
   apiRef.current = api;
 
   const refresh = useCallback(async () => {
     try {
-      const s = await apiRef.current.fetchSecrets();
-      setSecrets(s);
+      const sid = currentServer?.id;
+      const data = await apiRef.current.fetchSecrets(sid);
+      setSecrets(data.secrets);
+      setServerSecrets(data.server || {});
     } catch (e: any) {
       setError(e.message);
     }
     setLoading(false);
-  }, []);
+  }, [currentServer]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -190,10 +194,11 @@ function SecretsPanel({ api }: { api: ReturnType<typeof useApi> }) {
     if (!newKey.trim()) return;
     setError(null);
     try {
-      await api.setSecret(newKey.trim(), newValue);
+      const sid = scope === 'server' ? currentServer?.id : undefined;
+      await apiRef.current.setSecret(newKey.trim(), newValue, sid);
       setNewKey('');
       setNewValue('');
-      setMsg('Secret saved');
+      setMsg(`Secret saved ${scope === 'server' && currentServer ? `to ${currentServer.name}` : 'globally'}`);
       await refresh();
     } catch (e: any) {
       setError(e.message);
@@ -204,7 +209,8 @@ function SecretsPanel({ api }: { api: ReturnType<typeof useApi> }) {
     if (!confirm(`Delete secret "${key}"?`)) return;
     setError(null);
     try {
-      await api.deleteSecret(key);
+      const sid = scope === 'server' ? currentServer?.id : undefined;
+      await apiRef.current.deleteSecret(key, sid);
       setMsg('Secret deleted');
       await refresh();
     } catch (e: any) {
@@ -214,27 +220,54 @@ function SecretsPanel({ api }: { api: ReturnType<typeof useApi> }) {
 
   if (loading) return null;
 
+  const displaySecrets = scope === 'server' && currentServer
+    ? { ...secrets } // effective = global + server, but we show all with scope badge
+    : secrets;
+
+  const isServerOverride = (key: string) => scope === 'server' && !!serverSecrets[key];
+
   return (
     <div className="card" style={{ marginTop: 24 }}>
-      <h2>Global Secrets</h2>
-      <p className="hint">Store API keys, tokens and other secrets locally. When importing a template, matching variable names are auto-filled.</p>
+      <h2>Secrets</h2>
+      <p className="hint">
+        When importing a template, server secrets override global secrets.
+        Global secrets are shared across all servers.
+      </p>
+
+      {currentServer && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button className={`btn-small ${scope === 'global' ? 'btn-small-active' : ''}`} onClick={() => setScope('global')}>
+            Global
+          </button>
+          <button className={`btn-small ${scope === 'server' ? 'btn-small-active' : ''}`} onClick={() => setScope('server')}>
+            {currentServer.name}
+          </button>
+        </div>
+      )}
 
       {msg && <div className="success-banner">{msg}</div>}
       {error && <div className="error-banner">{error}</div>}
 
-      {Object.keys(secrets).length > 0 ? (
+      {Object.keys(displaySecrets).length > 0 ? (
         <table className="runtime-table">
           <thead>
             <tr>
               <th>Name</th>
+              <th>Scope</th>
               <th>Value</th>
               <th style={{ width: 60 }} />
             </tr>
           </thead>
           <tbody>
-            {Object.entries(secrets).map(([key, value]) => (
+            {Object.entries(displaySecrets).map(([key, value]) => (
               <tr key={key}>
                 <td><code>{key}</code></td>
+                <td>
+                  {isServerOverride(key)
+                    ? <span className="badge" style={{ fontSize: 10, background: 'var(--accent)' }}>{currentServer?.name}</span>
+                    : <span style={{ fontSize: 11, color: 'var(--text2)' }}>global</span>
+                  }
+                </td>
                 <td><code style={{ fontSize: 11, color: 'var(--text2)' }}>{value.substring(0, 20)}{value.length > 20 ? '...' : ''}</code></td>
                 <td>
                   <button className="btn-small" onClick={() => removeSecret(key)} style={{ borderColor: 'var(--red)', color: 'var(--red)', fontSize: 10 }}>Del</button>
@@ -265,7 +298,9 @@ function SecretsPanel({ api }: { api: ReturnType<typeof useApi> }) {
           onChange={(e) => setNewValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && addSecret()}
         />
-        <button className="btn btn-primary" onClick={addSecret}>Add</button>
+        <button className="btn btn-primary" onClick={addSecret}>
+          Add ({scope === 'server' && currentServer ? currentServer.name : 'Global'})
+        </button>
       </div>
     </div>
   );

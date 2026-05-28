@@ -306,36 +306,51 @@ export function useApi() {
 
   // ── Secrets ──
 
-  const fetchSecrets = useCallback(async () => {
-    const res = await fetch('/api/secrets');
+  const fetchSecrets = useCallback(async (serverId?: string) => {
+    const url = serverId ? `/api/secrets?server=${encodeURIComponent(serverId)}` : '/api/secrets';
+    const res = await fetch(url);
     const data = await res.json();
-    return data.secrets as Record<string, string>;
+    return data as { secrets: Record<string, string>; server?: Record<string, string>; global?: Record<string, string> };
   }, []);
 
-  const setSecret = useCallback(async (key: string, value: string) => {
+  const setSecret = useCallback(async (key: string, value: string, serverId?: string) => {
     const res = await fetch('/api/secrets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
+      body: JSON.stringify({ key, value, server_id: serverId }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
   }, []);
 
-  const deleteSecret = useCallback(async (key: string) => {
-    const res = await fetch(`/api/secrets/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  const deleteSecret = useCallback(async (key: string, serverId?: string) => {
+    const url = serverId
+      ? `/api/secrets/${encodeURIComponent(key)}?server=${encodeURIComponent(serverId)}`
+      : `/api/secrets/${encodeURIComponent(key)}`;
+    const res = await fetch(url, { method: 'DELETE' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
   }, []);
 
-  const resolveSecrets = useCallback(async (env: Record<string, string>) => {
+  const resolveSecrets = useCallback(async (env: Record<string, string>, serverId?: string) => {
     const res = await fetch('/api/secrets/resolve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ env }),
+      body: JSON.stringify({ env, server_id: serverId }),
     });
     const data = await res.json();
     return data.resolved as Record<string, string>;
+  }, []);
+
+  const saveSecretsToServer = useCallback(async (serverId: string, env: Record<string, string>) => {
+    const res = await fetch('/api/secrets/save-to-server', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ server_id: serverId, env }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data as { ok: boolean; saved: number };
   }, []);
 
   return {
@@ -358,6 +373,7 @@ export function useApi() {
     setSecret,
     deleteSecret,
     resolveSecrets,
+    saveSecretsToServer,
   };
 }
 

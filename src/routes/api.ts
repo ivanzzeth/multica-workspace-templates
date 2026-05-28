@@ -19,13 +19,21 @@ export async function createApiRouter() {
   const exporter = new ExportEngine(scanner, writer, reader);
   const servers = new ServerStore();
   servers.seed();
-  const secrets = new SecretStore();
+  const secrets = new SecretStore(servers);
 
-  // ── Secrets ──
+  // ── Global Secrets ──
 
-  router.get('/secrets', (_req, res) => {
+  router.get('/secrets', (req, res) => {
     try {
-      res.json({ secrets: secrets.list() });
+      const serverId = req.query.server as string | undefined;
+      if (serverId) {
+        const current = secrets.effectiveSecrets(serverId);
+        const serverOnly = secrets.listServer(serverId);
+        const globalOnly = secrets.listGlobal();
+        res.json({ secrets: current, server: serverOnly, global: globalOnly });
+      } else {
+        res.json({ secrets: secrets.listGlobal() });
+      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -33,13 +41,17 @@ export async function createApiRouter() {
 
   router.post('/secrets', (req, res) => {
     try {
-      const { key, value } = req.body;
+      const { key, value, server_id } = req.body;
       if (!key || value === undefined) {
         res.status(400).json({ error: 'key and value are required' });
         return;
       }
-      secrets.set(key, value);
-      res.json({ ok: true });
+      if (server_id) {
+        secrets.setServer(server_id, key, value);
+      } else {
+        secrets.setGlobal(key, value);
+      }
+      res.json({ ok: true, server_id: server_id || null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -47,7 +59,13 @@ export async function createApiRouter() {
 
   router.delete('/secrets/:key', (req, res) => {
     try {
-      const ok = secrets.delete(req.params.key);
+      const serverId = req.query.server as string | undefined;
+      let ok: boolean;
+      if (serverId) {
+        ok = secrets.deleteServer(serverId, req.params.key);
+      } else {
+        ok = secrets.deleteGlobal(req.params.key);
+      }
       if (!ok) {
         res.status(404).json({ error: 'Secret not found' });
         return;
@@ -61,7 +79,29 @@ export async function createApiRouter() {
   router.post('/secrets/resolve', (req, res) => {
     try {
       const env = req.body.env as Record<string, string>;
-      res.json({ resolved: secrets.resolve(env) });
+      const serverId = req.body.server_id as string | undefined;
+      res.json({ resolved: secrets.resolve(env, serverId) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Mass save resolved env vars to a server's secrets
+  router.post('/secrets/save-to-server', (req, res) => {
+    try {
+      const { server_id, env } = req.body as { server_id: string; env: Record<string, string> };
+      if (!server_id || !env) {
+        res.status(400).json({ error: 'server_id and env are required' });
+        return;
+      }
+      let count = 0;
+      for (const [key, value] of Object.entries(env)) {
+        if (value && !value.startsWith('${')) {
+          secrets.setServer(server_id, key, value);
+          count++;
+        }
+      }
+      res.json({ ok: true, saved: count });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

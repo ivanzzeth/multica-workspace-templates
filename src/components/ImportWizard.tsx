@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { useApi, Workspace, TemplateSummary, TemplateDetail, RuntimeInfo } from '../hooks/useApi.js';
+import type { useApi, Workspace, TemplateSummary, TemplateDetail, RuntimeInfo, ServerProfile } from '../hooks/useApi.js';
 
 interface Props {
   api: ReturnType<typeof useApi>;
+  currentServer?: ServerProfile | null;
 }
 
 type Step = 'workspace' | 'template' | 'runtime' | 'result';
 
-export function ImportWizard({ api }: Props) {
+export function ImportWizard({ api, currentServer }: Props) {
   const [step, setStep] = useState<Step>('workspace');
   const [ws, setWs] = useState<Workspace | null>(null);
   const [template, setTemplate] = useState<TemplateDetail | null>(null);
@@ -23,6 +24,7 @@ export function ImportWizard({ api }: Props) {
   const [progress, setProgress] = useState<Record<string, { current: number; total: number; action: string; item: string }>>({});
   const [envVars, setEnvVars] = useState<Record<string, string>>({});
   const [envTemplate, setEnvTemplate] = useState<Record<string, string>>({});
+  const [envSavedMsg, setEnvSavedMsg] = useState<string | null>(null);
 
   const apiRef = useRef(api);
   apiRef.current = api;
@@ -70,7 +72,7 @@ export function ImportWizard({ api }: Props) {
 
           if (Object.keys(allEnv).length > 0) {
             try {
-              const resolved = await apiRef.current.resolveSecrets(allEnv);
+              const resolved = await apiRef.current.resolveSecrets(allEnv, currentServer?.id);
               // Merge: global secret values take priority
               const initial: Record<string, string> = { ...allEnv };
               for (const key of Object.keys(resolved)) {
@@ -237,7 +239,10 @@ export function ImportWizard({ api }: Props) {
           {Object.keys(envTemplate).length > 0 && (
             <>
               <h3>Environment Variables</h3>
-              <p className="hint">Values pre-filled from global secrets. Replace <code>${'{KEY}'}</code> placeholders with real values.</p>
+              <p className="hint">
+                {currentServer ? <>Resolved from <strong>{currentServer.name}</strong> server → global fallback.</> : 'Resolved from global secrets.'}
+                {' '}Replace <code>{'${KEY}'}</code> placeholders with real values.
+              </p>
               <table className="runtime-table">
                 <thead>
                   <tr>
@@ -264,6 +269,25 @@ export function ImportWizard({ api }: Props) {
                   ))}
                 </tbody>
               </table>
+              {currentServer && (
+                <>
+                  <button
+                    className="btn btn-small"
+                    style={{ marginTop: 8 }}
+                    onClick={async () => {
+                      try {
+                        const r = await apiRef.current.saveSecretsToServer(currentServer.id, envVars);
+                        setEnvSavedMsg(`${r.saved} secret${r.saved !== 1 ? 's' : ''} saved to ${currentServer.name}`);
+                      } catch (e: any) {
+                        setError(e.message);
+                      }
+                    }}
+                  >
+                    Save to {currentServer.name} Server Secrets
+                  </button>
+                  {envSavedMsg && <div className="success-banner" style={{ marginTop: 8 }}>{envSavedMsg}</div>}
+                </>
+              )}
             </>
           )}
 

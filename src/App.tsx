@@ -110,7 +110,7 @@ export default function App() {
       <main className="main">
         {error && <div className="error-banner">{error}</div>}
         {page === 'templates' && <TemplatesView api={api} />}
-        {page === 'import' && <ImportWizard api={api} />}
+        {page === 'import' && <ImportWizard api={api} currentServer={currentServer} />}
         {page === 'export' && <ExportForm api={api} />}
         {page === 'settings' && <SettingsView api={api} onServersChanged={refreshServers} />}
       </main>
