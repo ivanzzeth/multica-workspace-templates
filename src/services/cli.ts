@@ -382,3 +382,17 @@ export async function agentSkillsSet(
     workspaceId,
   });
 }
+
+// ── Delete Operations (for rollback) ──
+
+export async function deleteAgent(agentId: string, workspaceId: string): Promise<void> {
+  await runMultica(['agent', 'delete', agentId, '--force'], { workspaceId });
+}
+
+export async function deleteSkill(skillId: string, workspaceId: string): Promise<void> {
+  await runMultica(['skill', 'delete', skillId, '--force'], { workspaceId });
+}
+
+export async function deleteAutopilot(autopilotId: string, workspaceId: string): Promise<void> {
+  await runMultica(['autopilot', 'delete', autopilotId, '--force'], { workspaceId });
+}

@@ -1,0 +1,20 @@
+schema_version: "2.0"
+name: ConflictTeam
+description: Template where inline and entity-ref names collide
+agents:
+  - name: Worker
+    description: Inline Worker
+    instructions: "# Inline Worker\n\nYou are the inline worker."
+    model: auto
+    runtime_provider: claude
+skills: []
+autopilots: []
+projects: []
+labels: []
+runtime_mapping:
+  claude:
+    display_name: Claude
+includes:
+  entities:
+    - ref: agent/worker@2.0.1
+

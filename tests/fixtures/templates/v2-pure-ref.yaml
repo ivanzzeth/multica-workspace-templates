@@ -1,0 +1,18 @@
+schema_version: "2.0"
+name: PureRefTeam
+description: A team with entity-ref agents only (no inline)
+metadata:
+  tags: [team, dev]
+agents: []
+skills: []
+autopilots: []
+projects: []
+labels: []
+runtime_mapping:
+  claude:
+    display_name: Claude
+includes:
+  entities:
+    - ref: agent/worker@2.0.1
+    - ref: agent/qa@1.5.0
+

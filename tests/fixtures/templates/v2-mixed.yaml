@@ -1,0 +1,35 @@
+schema_version: "2.0"
+name: MixedTeam
+description: Mixed inline + entity-ref template
+metadata:
+  tags: [mixed]
+agents:
+  - name: Assistant
+    description: Assistant agent
+    instructions: "# Assistant\n\nYou are the assistant."
+    model: auto
+    runtime_provider: claude
+    visibility: private
+skills:
+  - name: custom-skill
+    description: A skill defined inline
+    files:
+      - path: SKILL.md
+        content: "# Custom Skill\n\nInline skill content."
+autopilots:
+  - title: Morning Standup
+    description: Daily morning sync
+    agent_ref: Assistant
+    mode: run_only
+projects: []
+labels: []
+runtime_mapping:
+  claude:
+    display_name: Claude
+includes:
+  entities:
+    - ref: agent/worker@2.0.1
+      overrides:
+        model: claude-opus-4-8
+    - ref: skill/golang-testing@1.2.0
+

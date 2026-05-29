@@ -36,7 +36,10 @@ export class ExportEngine {
     for (const candidate of candidates) {
       try {
         const existing = this.reader.readTemplate(candidate);
-        const v = existing.version || '1.0';
+        const v = ('version' in existing ? (existing as any).version : undefined)
+          || existing.schema_version
+          || '1.0';
+
         const parts = v.split('.');
         const major = parseInt(parts[0], 10) || 1;
         const minor = parseInt(parts[1], 10) || 0;
