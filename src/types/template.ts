@@ -199,6 +199,37 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   labels: false,
 };
 
+/** Export mode for v2 templates. */
+export type ExportMode = 'inline' | 'reference' | 'mixed';
+
+/** Extended export options for v2. */
+export interface ExportOptionsV2 extends ExportOptions {
+  /** Export mode (default: 'mixed'). */
+  mode?: ExportMode;
+  /** Per-agent decision: 'inline' or 'entity' (default: 'entity' for reference, 'inline' for mixed). */
+  agent_mode?: Record<string, 'inline' | 'entity'>;
+  /** Per-skill decision: 'inline' or 'entity'. */
+  skill_mode?: Record<string, 'inline' | 'entity'>;
+  /** Per-autopilot decision: 'inline' or 'entity'. */
+  autopilot_mode?: Record<string, 'inline' | 'entity'>;
+  /** Whether to publish extracted entities to remote registry. */
+  publish?: boolean;
+  /** Remote to publish to (if publish is true). */
+  remote?: string;
+  /** Auto-version-bump strategy (default: 'patch'). */
+  version_bump?: 'auto' | 'major' | 'minor' | 'patch' | 'none';
+}
+
+export const DEFAULT_EXPORT_OPTIONS_V2: ExportOptionsV2 = {
+  agents: true,
+  autopilots: true,
+  skills: true,
+  projects: false,
+  labels: false,
+  mode: 'mixed',
+  version_bump: 'patch',
+};
+
 export interface TemplateSummary {
   name: string;
   version: string;
