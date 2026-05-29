@@ -18,6 +18,8 @@ export interface TemplateSummary {
   autopilot_count: number;
   skill_count: number;
   source?: 'builtin' | 'user';
+  entity_ref_count?: number;
+  mode?: 'inline' | 'reference' | 'mixed';
 }
 
 export interface TemplateDetail {
@@ -128,6 +130,20 @@ export interface ExportOptions {
   skills: boolean;
   projects: boolean;
   labels: boolean;
+}
+
+export interface EntitySummary {
+  ref: string;
+  type: 'skill' | 'agent' | 'autopilot';
+  namespace: string;
+  name: string;
+  version: string;
+  description: string;
+  source: string;
+  size: number;
+  imported_at: string;
+  deps_info?: string;
+  tags?: string[];
 }
 
 // ── API Hook ──
@@ -359,6 +375,54 @@ export function useApi() {
     return data as { ok: boolean; saved: number };
   }, []);
 
+  // ── Entities ──
+
+  const fetchEntities = useCallback(async (filter?: Record<string, string>) => {
+    const params = new URLSearchParams(filter || {});
+    const res = await fetch(`/api/entities?${params}`);
+    const data = await res.json();
+    return data.entities as EntitySummary[];
+  }, []);
+
+  const fetchEntity = useCallback(async (type: string, name: string, version?: string, namespace?: string) => {
+    const params = new URLSearchParams();
+    if (version) params.set('version', version);
+    if (namespace) params.set('namespace', namespace);
+    const qs = params.toString();
+    const res = await fetch(`/api/entities/${encodeURIComponent(type)}/${encodeURIComponent(name)}${qs ? '?' + qs : ''}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data as { entity: any; ref: string };
+  }, []);
+
+  const validateEntity = useCallback(async (content?: string, filePath?: string) => {
+    const res = await fetch('/api/entities/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, file_path: filePath }),
+    });
+    const data = await res.json();
+    return data as { valid: boolean; entity_type?: string; issues: Array<{ severity: string; field?: string; message: string }> };
+  }, []);
+
+  const importEntity = useCallback(async (content?: string, filePath?: string) => {
+    const res = await fetch('/api/entities/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, file_path: filePath }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data as { ok: boolean; entry: any };
+  }, []);
+
+  const deleteEntity = useCallback(async (type: string, name: string, version: string, namespace?: string) => {
+    const params = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
+    const res = await fetch(`/api/entities/${encodeURIComponent(type)}/${encodeURIComponent(name)}/${encodeURIComponent(version)}${params}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+  }, []);
+
   return {
     workspaces,
     templates,
@@ -380,6 +444,11 @@ export function useApi() {
     deleteSecret,
     resolveSecrets,
     saveSecretsToServer,
+    fetchEntities,
+    fetchEntity,
+    validateEntity,
+    importEntity,
+    deleteEntity,
   };
 }
 

@@ -4,15 +4,17 @@ import { ImportWizard } from './components/ImportWizard.js';
 import { ExportForm } from './components/ExportForm.js';
 import { TemplatesView } from './components/TemplatesView.js';
 import { SettingsView } from './components/SettingsView.js';
+import { EntityBrowser } from './components/EntityBrowser.js';
 import './styles/app.css';
 
-type Page = 'import' | 'export' | 'templates' | 'settings';
+type Page = 'import' | 'export' | 'templates' | 'settings' | 'entities';
 
 const PAGE_MAP: Record<string, Page> = {
   '#templates': 'templates',
   '#import': 'import',
   '#export': 'export',
   '#settings': 'settings',
+  '#entities': 'entities',
 };
 
 function getPageFromHash(): Page {
@@ -107,6 +109,9 @@ export default function App() {
           <button className={`nav-btn ${page === 'export' ? 'active' : ''}`} onClick={() => navigate('export')}>
             Export
           </button>
+          <button className={`nav-btn ${page === 'entities' ? 'active' : ''}`} onClick={() => navigate('entities')}>
+            Entities
+          </button>
           <button className={`nav-btn ${page === 'settings' ? 'active' : ''}`} onClick={() => navigate('settings')}>
             Settings
           </button>
@@ -133,6 +138,7 @@ export default function App() {
         {page === 'templates' && <TemplatesView api={api} />}
         {page === 'import' && <ImportWizard api={api} currentServer={currentServer} />}
         {page === 'export' && <ExportForm api={api} />}
+        {page === 'entities' && <EntityBrowser api={api} />}
         {page === 'settings' && <SettingsView api={api} onServersChanged={refreshServers} />}
       </main>
     </div>
