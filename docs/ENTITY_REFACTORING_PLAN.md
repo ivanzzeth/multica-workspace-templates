@@ -1,9 +1,9 @@
 # Multica Workspace Templates — Entity Componentization Refactoring Plan
 
-> **Version**: v0.3.0-reviewed  
-> **Status**: Reviewed (4-perspective) — ready for implementation  
+> **Version**: v0.4.0-revised  
+> **Status**: Revised (superset design, testing strategy, UI design)  
 > **Author**: Ivan Zhang & Claude  
-> **Last Updated**: 2026-05-29
+> **Last Updated**: 2026-05-29 14:03 UTC+08
 
 ---
 
@@ -46,17 +46,45 @@ autopilots:
 | **No dependency graph** | No way to know "autopilot X depends on agent Y which depends on skills A, B, C" |
 | **Drift between instances** | Workspace A and Workspace B both imported `Worker`, then evolved independently — no way to reconcile |
 
-### 1.3 The Goal
+### 1.3 Design Principle: Superset, Not Rewrite
 
-Transform the template system from **monolithic snapshots** into a **composable entity architecture**:
+**v2 is a strict superset of v1.** The existing inline format is the foundation; entity references are an additional capability layered on top.
 
 ```
-Before:   Template = [Agents + Skills + Autopilots + Projects + Labels]  (one big YAML)
-After:    Template = Entity References + Overrides                         (5KB manifest)
-          Entity   = [Agent | Skill | Autopilot]                          (independently versioned)
+v1 (existing):              Template = Inline [Agents + Skills + Autopilots + Projects + Labels]
+
+v2 (new, superset):         Template = Inline [Agents + Skills + Autopilots + ...]     ← v1 subset, fully supported
+                            PLUS
+                            Template.includes.entities = [Refs to external entities]    ← NEW capability
+
+                            At import time:
+                            ref entities + inline entities → merged into single workspace
+                            (inline wins on name collision — explicit > implicit)
 ```
 
-**Entities are the product. Templates are just recipes.**
+**Key implications of the superset approach**:
+
+| Principle | What it means |
+|---|---|
+| **Zero breakage** | All existing v1 templates are valid v2 templates. No migration required. |
+| **Inline always works** | Users can always define agents/skills inline. v1 template = v2 template with no `includes` section. |
+| **Refs are additive** | Entity references ADD entities to the import; they don't replace inline content. |
+| **Inline wins on conflict** | If an entity ref and an inline definition have the same name, inline wins (explicit overrides implicit). |
+| **Mixed mode** | A single template can have inline agents AND entity-ref agents. They coexist. |
+| **Gradual adoption** | Users start with inline. When they want to reuse an agent, they extract it as an entity. Other templates reference it. The original template still works with inline until they choose to switch. |
+
+**The goal**:
+
+```
+Before:   Template = [Agents + Skills + Autopilots + Projects + Labels]  (one big YAML, no reuse)
+
+After:    Template = [Agents + Skills + Autopilots + ...]                 ← inline still works
+             + includes.entities = [ref: agent/worker@2.0, ...]           ← NEW: compose from entities
+
+          Entity = [Agent | Skill | Autopilot]                            ← independently versioned, reusable
+```
+
+**Entities are an optional building block. Templates remain fully self-contained YAML files.**
 
 ---
 
@@ -213,44 +241,62 @@ Template references can optionally pin a hash for integrity verification.
 
 ## 3. Template Composition Model
 
-### 3.1 New Template Schema (v2.0)
+### 3.1 New Template Schema (v2.0 — Superset of v1)
+
+v2 templates support BOTH inline definitions AND entity references. They coexist and merge at import time.
 
 ```yaml
-# Template = composition manifest, NOT monolithic blob
-version: "2.0"
+# Template v2.0 = v1 inline definitions + optional entity references
 schema_version: "2.0"
 name: Basic4Agent
 description: Basic 4-agent team with full development capabilities
+metadata:
+  author: multica
+  tags: [team, development]
 
-# Include section: entity references
+# ── Section A: Inline definitions (v1 format, fully supported) ──
+# Everything that worked in v1 still works here. This section alone
+# makes the file a valid v1 template (backward compatible).
+agents:
+  - name: Assistant
+    description: 需求沟通、创建 issue、工作区管理
+    instructions: |-
+      ... (full instructions, same as v1)
+    model: deepseek-v4-pro
+    runtime_provider: claude
+    skills: [agent-browser, code-review-quality, ...]
+
+skills:
+  - name: golang-testing
+    files:
+      - path: SKILL.md
+        content: |-
+          ... (full skill content)
+
+autopilots:
+  - title: Daily Sync
+    agent_ref: Planner
+    triggers: [...]
+
+# ── Section B: Entity references (NEW in v2) ──
+# These are ADDED to the inline definitions at import time.
+# If a ref has the same name as an inline agent/skill/autopilot,
+# the INLINE version wins (explicit > implicit).
 includes:
   entities:
-    - ref: agent/assistant@^3.0.0
+    - ref: agent/worker@2.0.1
       hash: sha256:abc123...        # optional, for integrity pinning
       overrides:                      # optional, template-level overrides
-        model: deepseek-v4-pro        # override model for this template
-    - ref: agent/worker@^2.0.0
-      overrides:
-        max_concurrent_tasks: 8
-    - ref: agent/planner@^1.0.0
-    - ref: agent/qa@^1.5.0
-    - ref: autopilot/daily-sync@^1.0.0
-    - ref: autopilot/weekly-review@^1.0.0
+        model: claude-opus-4-8
+    - ref: agent/qa@1.5.0
+    - ref: skill/golang-testing@1.2.0
+    - ref: autopilot/weekly-review@1.0.0
 
-  # Inline-only entities (no reusable value, or quick prototyping)
-  inline:
-    skills: []                       # skills defined inline (rare — prefer entity refs)
-    agents: []                       # agents defined inline
-    autopilots: []
-
-# Workspace-scoped objects (not entities — mutable state)
+# ── Section C: Workspace-scoped objects (same as v1) ──
 projects:
   - title: My Project
     description: ...
     status: in_progress
-    resources:
-      - resource_type: github_repo
-        resource_ref: { url: "https://github.com/user/repo" }
 
 labels:
   - name: bug
@@ -259,17 +305,36 @@ labels:
 runtime_mapping:
   claude: { display_name: "Claude" }
   cursor: { display_name: "Cursor" }
-  codex: { display_name: "Codex" }
 ```
 
-### 3.2 Template Size Reduction
+### 3.2 Import Merge Rules (Inline + Entity Refs)
 
-| Template | v1.1 (monolithic) | v2.0 (reference-based) | Reduction |
+When both inline definitions and entity references exist, the import engine merges them:
+
+```
+Template.agents.inline       = [Assistant, Planner]        (from Section A)
+Template.includes.entities   = [agent/worker@2.0.1, ...]   (from Section B)
+                   ↓
+           Merge (union), inline wins on name collision
+                   ↓
+Final import set             = [Assistant, Planner, Worker, QA, ...]
+```
+
+**Conflict resolution** (same name in both inline and ref):
+1. **Inline wins**: The inline definition is the explicit version for this template. The entity ref with the same name is skipped with a warning ("Agent 'X' defined inline; entity ref 'agent/X@Y' ignored").
+2. **Only ref provided**: Entity is resolved from registry and imported.
+3. **Only inline provided**: Imported directly (identical to v1 behavior).
+
+### 3.3 Template Size: Mixed Mode
+
+| Template | v1 (inline only) | v2 (mixed) | v2 (pure ref) |
 |---|---|---|---|
-| basic4agent | ~28,000 lines / 900KB | ~50-100 lines / 5KB | **~99.8%** |
-| CI/CD dev template | ~15,000 lines | ~40 lines / 3KB | **~99.7%** |
+| basic4agent | ~28,000 lines | ~15,000 lines (agents inline) + 5 entity refs | ~50 lines |
+| Custom team | ~8,000 lines | ~8,000 lines (no entity refs used) | N/A |
 
-### 3.3 Override Semantics
+Users choose their own level of decomposition. No forced migration.
+
+### 3.4 Override Semantics
 
 Overrides apply at **template import time** and take precedence over entity defaults:
 
@@ -293,7 +358,7 @@ includes:
 
 **Rationale**: `instructions` is the core value of an Agent entity. Overriding it in a template defeats the purpose of independent versioning — just create `agent/worker@2.1.0` with the new instructions.
 
-### 3.4 Override Merge Strategy
+### 3.5 Override Merge Strategy
 
 ```
 final = entity_defaults > template_overrides > import-time_options
@@ -608,51 +673,97 @@ interface ExportOptions {
 
 ---
 
-## 8. Backward Compatibility
+## 8. Backward Compatibility (Superset Design)
 
-### 8.1 Reading v1 Templates
+### 8.1 v1 Templates ARE Valid v2 Templates
 
-The `TemplateReader` must detect template version:
+Since v2 is a superset of v1, **every existing v1 template is automatically a valid v2 template** with zero changes:
+
+```yaml
+# This v1 template:
+version: "1.1"
+name: Basic4Agent
+agents: [...]
+skills: [...]
+autopilots: [...]
+
+# ...is semantically identical to this v2 template:
+schema_version: "2.0"
+name: Basic4Agent
+agents: [...]        # inline — same as v1
+skills: [...]        # inline — same as v1
+autopilots: [...]    # inline — same as v1
+# includes section simply omitted (no entity refs)
+```
+
+### 8.2 TemplateReader Version Detection
+
+The `TemplateReader` detects format by checking the `schema_version` field:
 
 ```typescript
-function readTemplate(name: string): Template | TemplateV2 {
+function readTemplate(name: string): TemplateV2 {
   const raw = parseYaml(content);
 
-  if (raw.version?.startsWith('2.')) {
-    return parseV2(raw);     // new entity-reference format
+  // v1 format: has `version: "1.x"` without `schema_version`
+  // v2 format: has `schema_version: "2.x"`
+  if (raw.schema_version?.startsWith('2.')) {
+    return parseV2(raw);     // may have includes.entities
   }
-  return parseV1(raw);       // legacy monolithic format
+
+  // v1 format OR v2 format without includes
+  // Both are valid: inline agents/skills/autopilots
+  return parseAsInline(raw);  // unified internal representation
 }
 ```
 
-### 8.2 Importing v1 Templates
+### 8.3 Import Engine: Unified Pipeline
 
-v1 templates are treated as **all-inline** v2 templates:
+Since both formats produce inline content, and v2 adds optional entity refs, the import pipeline is unified:
+
+```typescript
+function importTemplate(template: TemplateV2, opts: ImportOptions): ImportResult {
+  // Step 1: Collect inline entities (present in both v1 and v2)
+  const inlineSet = collectInlineEntities(template);  // agents, skills, autopilots
+
+  // Step 2: Resolve entity refs (v2 only, empty array for v1)
+  const refSet = resolveEntityRefs(template.includes?.entities ?? [], registry);
+
+  // Step 3: Merge — inline wins on name collision
+  const finalSet = merge(inlineSet, refSet, { inlineWins: true });
+
+  // Step 4: Import in topological order (same pipeline for both)
+  return applyImport(finalSet, opts);
+}
+```
+
+### 8.4 Export: All Three Modes Produce Valid Templates
+
+| Mode | Output | Backward Compatible? |
+|------|--------|---------------------|
+| `inline` | v1-style monolithic YAML | ✅ Valid v1 AND v2 |
+| `reference` | v2 manifest with entity refs, empty inline | ✅ Valid v2 |
+| `mixed` | v2 manifest with BOTH inline AND entity refs | ✅ Valid v2 |
+
+### 8.5 Gradual Adoption Path
 
 ```
-v1 template → internally converted to v2 with everything in `includes.inline`
-            → import proceeds normally
-```
+Phase A: No change
+  User continues exporting/importing v1 inline templates.
+  └─ Works exactly as before. No migration needed.
 
-### 8.3 Exporting for v1 Consumers
+Phase B: Extract one entity
+  User exports with --mode mixed, extracts the Worker agent as an entity.
+  └─ Template has: inline Assistant + Planner, entity ref agent/worker@1.0.0
+  └─ Other templates can now reference agent/worker@1.0.0
 
-The `ExportEngine` can still produce v1 templates via `mode: 'inline'`:
+Phase C: Entity-first
+  User migrates all reusable agents to entities.
+  └─ Template has: entity refs only, inline section is empty
+  └─ Template size ~50 lines
 
-```bash
-multica-templates export --mode inline   # produces v1-compatible monolithic YAML
-multica-templates export --mode reference # produces v2 manifest + entities
-multica-templates export --mode split     # produces v2 manifest + entity files
-```
-
-### 8.4 Migration Path
-
-```
-Week 1-2:   Implement v2 schema + entity registry (v0.2.0)
-Week 3:     Implement v2 import (v0.3.0)
-Week 4:     Implement v2 export (v0.4.0)
-Week 5:     Migration tool: convert v1 templates to v2 (v0.5.0)
-Week 6:     Entity publish/pull from remote (v0.6.0)
-Week 7-8:   UI updates + testing + docs (v1.0.0)
+Phase D: Mixed always available
+  Even at Phase C, the user can add an inline agent for quick prototyping.
+  └─ v2 supports mixed mode indefinitely — no forced "purity"
 ```
 
 ---
@@ -778,49 +889,485 @@ Week 7-8:   UI updates + testing + docs (v1.0.0)
 - `src/routes/api.ts` (remote routes)
 - CLI subcommands
 
-### Phase 6: UI — Granular Import & Entity Browser (v0.7.0)
+---
 
-**Goal**: Users can browse entities, pick individual ones to import, see dependency trees.
+## 10. UI Design
 
-**Tasks**:
-1. Entity Browser component (`src/components/EntityBrowser.tsx`):
-   - List local entities by type
-   - Show entity detail (version, description, dependencies)
-   - Dependency tree visualization
-2. Import Wizard v2:
-   - Template selection → dependency tree preview → granular entity checkboxes
-   - Show "these skills will be pulled" with version info
-   - Conflict resolution UI (two incompatible versions → user chooses)
-3. Export Wizard v2:
-   - Mode selection: inline / reference / split
-   - Entity version bump preview
-   - Entity publication checkbox
-4. **Deliverable**: Full UI for v2 import/export with entity management
+### 10.1 Design Principles
 
-**Files changed**:
-- `src/components/EntityBrowser.tsx` (new)
-- `src/components/ImportWizard.tsx` (refactor)
-- `src/components/ExportForm.tsx` (refactor)
-- `src/hooks/useApi.ts` (entity endpoints)
-- `src/App.tsx` (entity browser route)
+| Principle | Description |
+|---|---|
+| **Progressive disclosure** | v1 users see the same UI they're used to. Entity features appear only when they opt in. |
+| **Mixed mode is first-class** | The UI never forces a choice between "inline" and "entity ref." Both are always available. |
+| **Dependency visibility** | Users always see what WILL be imported before they commit. No hidden transitive pulls. |
+| **Gradual adoption** | The UI encourages (but never forces) entity extraction. "You've used this agent in 3 templates — extract as entity?" |
 
-### Phase 7: Migration Tool + Documentation (v0.8.0 → v1.0.0)
+### 10.2 Templates View — Main Dashboard
 
-**Goal**: Smooth upgrade path and comprehensive docs.
+```
+┌──────────────────────────────────────────────────────────────┐
+│  🏠 Templates                                [+ Import] [Export] │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ 🔍 Search templates...                                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Tabs: [All] [Built-in (2)] [User (3)] [v2 Entity (1)]      │
+│                                                              │
+│  ┌──────────────────────┐ ┌──────────────────────────────┐  │
+│  │ 📦 Basic4Agent       │ │ 📦 My Team                   │  │
+│  │ v2.0 · Mixed mode    │ │ v1.1 · Inline only           │  │
+│  │ 4 agents (1 inline,  │ │ 3 agents · 15 skills         │  │
+│  │   3 entity refs)     │ │ Exported Jun 15              │  │
+│  │ 2 autopilots         │ │                              │  │
+│  │                       │ │ [Import] [View]              │  │
+│  │ [Import] [View]       │ │                              │  │
+│  └──────────────────────┘ └──────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────┐                                   │
+│  │ 🆕 Custom Dev Team   │                                   │
+│  │ v2.0 · Pure ref mode │                                   │
+│  │ 6 entity refs · 0 inline                                 │
+│  │ ~50 lines             │                                   │
+│  │                       │                                   │
+│  │ [Import] [View]       │                                   │
+│  └──────────────────────┘                                   │
+└──────────────────────────────────────────────────────────────┘
+```
 
-**Tasks**:
-1. `multica-templates migrate` command:
-   - Convert v1 monolithic YAML → v2 manifest + entity files
-   - Entity deduplication: detect duplicate agents/skills across templates
-   - Dry-run mode: preview what will be extracted
-2. Breaking change documentation
-3. Video walkthrough / blog post
-4. Release v1.0.0
-5. **Deliverable**: Existing v1 users can migrate in one command
+### 10.3 Import Wizard — Step by Step
+
+#### Step 1: Select Workspace
+Same as current v0.0.1 — list workspaces, click to select.
+
+#### Step 2: Select Template
+Same as current — show template list, click to select. After selection, template detail shows:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Template: Basic4Agent (v2.0 — mixed mode)                   │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                                                        │ │
+│  │  📋 Inline agents (2):                                  │ │
+│  │    Assistant · Worker                                   │ │
+│  │                                                        │ │
+│  │  🔗 Entity references (4):                              │ │
+│  │    agent/planner@1.0.0          ─── resolves from cache  │ │
+│  │    agent/qa@1.5.0               ─── resolves from cache  │ │
+│  │    autopilot/daily-sync@1.0.0                          │ │
+│  │    skill/golang-testing@1.2.0                          │ │
+│  │                                                        │ │
+│  │  ⚠️ 2 entities not in local cache. Will pull from:      │ │
+│  │    remote: my-team (git@github.com:myorg/entities.git) │ │
+│  │                                                        │ │
+│  │  [View Dependency Tree]                                │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Entity selection:  ○ All  ● Selected                       │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ ☑ agent/assistant (inline)                              │ │
+│  │ ☑ agent/worker (inline)                                 │ │
+│  │ ☑ agent/planner@1.0.0 (ref)     ──→ skills: [3]         │ │
+│  │ ☑ agent/qa@1.5.0 (ref)          ──→ skills: [2]         │ │
+│  │ ☑ autopilot/daily-sync@1.0.0    ──→ agent: planner      │ │
+│  │ ☑ skill/golang-testing@1.2.0                            │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [◀ Back]                              [Continue: Runtime Map ▶] │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### Step 3: Runtime Mapping
+Same as current v0.0.1 — for each agent, pick a runtime. Enhanced:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Runtime Mapping                                            │
+│                                                              │
+│  Inline agents:                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Assistant    runtime: [Claude ▼]          provider: claude│ │
+│  │ Worker       runtime: [Claude ▼]          provider: claude│ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Entity-ref agents:                                          │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Planner      runtime: [Claude ▼]          provider: claude│ │
+│  │ QA           runtime: [Claude ▼]          provider: claude│ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Per-entity runtime override:                                │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ agent/planner@1.0.0                                     │ │
+│  │   Default runtime (from template): Claude                │ │
+│  │   Override: [Use template default ▼]                     │ │
+│  │                                                         │ │
+│  │ agent/qa@1.5.0                                          │ │
+│  │   Default runtime (from template): Claude                │ │
+│  │   Override: [Cursor ▼]                                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [◀ Back]                                  [Continue: Review ▶] │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### Step 4: Dependency Tree & Review
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Import Preview — Dependency Tree                           │
+│                                                              │
+│  📦 Template: Basic4Agent                                   │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                                                        │ │
+│  │  Agents (4)                          Skills (5)         │ │
+│  │  ┌──────────┐                       ┌────────────┐      │ │
+│  │  │ Assistant │──inline               │ go-testing │──ref │ │
+│  │  └──────────┘                       └────────────┘      │ │
+│  │  ┌──────────┐                       ┌────────────┐      │ │
+│  │  │  Worker   │──inline               │ python-pro │──ref │ │
+│  │  └──────────┘────┐                  └────────────┘      │ │
+│  │  ┌──────────┐    │                  ┌────────────┐      │ │
+│  │  │ Planner   │─ref│──→ skills       │sec-review  │──ref │ │
+│  │  └──────────┘    │                  └────────────┘      │ │
+│  │  ┌──────────┐    │                                      │ │
+│  │  │    QA    │─ref│  Autopilots (1)                       │ │
+│  │  └──────────┘    │  ┌──────────────┐                    │ │
+│  │                  │  │  Daily Sync  │──ref               │ │
+│  │                  └──│  → Planner   │                    │ │
+│  │                     └──────────────┘                    │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Actions Summary ───────────────────────────────────────┐ │
+│  │ 🟢 CREATE  4 agents, 5 skills, 1 autopilot             │ │
+│  │ 🟡 UPDATE  1 agent (Assistant — force-overwrite mode)  │ │
+│  │ ⚪ SKIP    1 skill (golang-testing already exists)     │ │
+│  │ ⚠️ WARNING skill "ruby-pro" not in registry — skipped  │ │
+│  └────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Entity lockfile:                                           │
+│  ☑ Generate entity-lock.yaml for reproducible imports      │
+│                                                              │
+│  Import mode:  ○ Skip existing  ● Force overwrite           │
+│                                                              │
+│  [◀ Back]                                  [▶ Apply Import]  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+#### Step 5: Import Progress
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Importing Basic4Agent to "Web3Gate"...                      │
+│                                                              │
+│  ┌─ Skills ────────────────────────────────────────────────┐ │
+│  │ ████████████████████████████  5/5 complete              │ │
+│  │ ✅ golang-testing     created                           │ │
+│  │ ✅ python-pro         created                           │ │
+│  │ ✅ security-review    created                           │ │
+│  │ ⬜ agent-browser      skipped (exists)                  │ │
+│  │ ✅ code-review        created                           │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Agents ────────────────────────────────────────────────┐ │
+│  │ ████████████░░░░░░░░░░░░░░  2/4 in progress            │ │
+│  │ ✅ Assistant          created                           │ │
+│  │ ✅ Worker             created                           │ │
+│  │ ⏳ Planner            importing...                      │ │
+│  │ ⬜ QA                 pending                           │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Autopilots ────────────────────────────────────────────┐ │
+│  │ ░░░░░░░░░░░░░░░░░░░░░░░░  0/1 pending                  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ℹ️ Agent "ruby-pro" ref was not found. Skipped.             │
+│    Run: multica-templates entity fetch skill/ruby-pro        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.4 Entity Browser
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  🧩 Entity Browser                                          │
+│                                                              │
+│  Tabs: [All (12)] [Agents (4)] [Skills (6)] [Autopilots (2)]│
+│                                                              │
+│  ┌─ Filter ────────────────────────────────────────────────┐ │
+│  │ 🔍 Search entities...    Source: [All ▼]  Status: [All ▼] │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌────────────────────┐ ┌────────────────────┐              │
+│  │ 🤖 Worker          │ │ 🤖 Assistant       │              │
+│  │ agent · 3 versions │ │ agent · 1 version  │              │
+│  │                    │ │                    │              │
+│  │ latest: 2.0.1     │ │ latest: 3.0.0     │              │
+│  │ skills: 6         │ │ skills: 12        │              │
+│  │ source: local     │ │ source: remote    │              │
+│  │ [View] [Install]   │ │ [View] [Fetch]    │              │
+│  └────────────────────┘ └────────────────────┘              │
+│                                                              │
+│  ┌────────────────────┐ ┌────────────────────┐              │
+│  │ 🛠 golang-testing  │ │ 🐍 python-pro      │              │
+│  │ skill · 5 versions │ │ skill · 2 versions │              │
+│  │ latest: 1.6.1     │ │ latest: 2.1.0     │              │
+│  │ used by: 2 agents │ │ used by: 1 agent  │              │
+│  │ [View] [Install]   │ │ [View] [Install]   │              │
+│  └────────────────────┘ └────────────────────┘              │
+│                                                              │
+│  ┌────────────────────┐ ┌────────────────────┐              │
+│  │ ⏰ Daily Sync      │ │ 📅 Weekly Review   │              │
+│  │ autopilot · 1 ver  │ │ autopilot · 1 ver  │              │
+│  │ agent: Planner     │ │ agent: Planner     │              │
+│  │ triggers: 1        │ │ triggers: 1        │              │
+│  │ [View]             │ │ [View]             │              │
+│  └────────────────────┘ └────────────────────┘              │
+│                                                              │
+│  [+ Import Entity]  [Fetch from Remote]                     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.5 Entity Detail View
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ◀ Back to Entity Browser                                   │
+│                                                              │
+│  🤖 Worker  ──────────────────────────────────────────────── │
+│  agent · v2.0.1 · local · sha256:abc123def                                  │
+│                                                              │
+│  Description: 开发+调研。全栈开发和技术调研                    │
+│  Model: auto · Runtime: claude · Visibility: private        │
+│  Max concurrent tasks: 6                                     │
+│                                                              │
+│  ┌─ Skills (6) ────────────────────────────────────────────┐ │
+│  │ 🛠 golang-testing@^1.2.0  ──→ latest 1.6.1 [local]      │ │
+│  │ 🐍 python-pro@^2.0.0      ──→ latest 2.1.0 [local]      │ │
+│  │ 🔒 security-review@^1.0.0 ──→ latest 1.3.0 [local]      │ │
+│  │ 📋 code-review@^1.5.0     ──→ latest 1.8.2 [remote]     │ │
+│  │ 🐙 gh-cli@^1.0.0          ──→ latest 1.2.0 [local]      │ │
+│  │ 🎨 frontend-design@^1.0.0 ──→ latest 1.4.1 [local]      │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Env Template ───────────────────────────────────────────┐ │
+│  │ ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}              │ │
+│  │ ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}                  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Versions: 2.0.1 (latest) · 2.0.0 · 1.0.0                   │
+│                                                              │
+│  ┌─ Instructions (preview) ────────────────────────────────┐ │
+│  │ # Multica Worker Agent                                  │ │
+│  │ 你是multica的Worker...                                   │ │
+│  │                                                         │ │
+│  │ [Expand to full instructions (24,000 chars)]            │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [Install to Workspace ▼]  [Fork Entity]  [Delete]          │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.6 Export Wizard v2
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Export Workspace Configuration                             │
+│                                                              │
+│  Step 1: Select Workspace                                   │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Workspace: [Web3Gate ▼]                                 │ │
+│  │ 4 agents · 15 skills · 2 autopilots · 3 projects       │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Step 2: Export Mode                                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                                                        │ │
+│  │  ● Mixed (recommended)                                 │ │
+│  │    Keep inline: Assistant, Worker                       │ │
+│  │    Extract as entity: Planner, QA                       │ │
+│  │    Extract as entity: 15 skills                         │ │
+│  │    Extract as entity: 2 autopilots                      │ │
+│  │                                                        │ │
+│  │  ○ Entity-reference only                               │ │
+│  │    All agents/skills/autopilots → entities              │ │
+│  │    Template: refs only (~50 lines)                     │ │
+│  │                                                        │ │
+│  │  ○ Inline only (v1 compatibility)                      │ │
+│  │    All agents/skills/autopilots → inline               │ │
+│  │    Template: monolithic (~28K lines)                   │ │
+│  │                                                        │ │
+│  │  ○ Custom                                              │ │
+│  │    Choose per entity: inline vs extract                 │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Step 3: Customize (when Custom mode selected)               │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Agents:                                                 │ │
+│  │   Assistant:  ○ Inline  ● Extract as entity            │ │
+│  │   Worker:     ○ Inline  ● Extract as entity            │ │
+│  │   Planner:    ● Inline  ○ Extract as entity            │ │
+│  │   QA:         ● Inline  ○ Extract as entity            │ │
+│  │                                                        │ │
+│  │ Skills:                                                 │ │
+│  │   ☑ Extract all 15 skills as entities                   │ │
+│  │   ☐ Include skill file contents (large but portable)   │ │
+│  │                                                        │ │
+│  │ Autopilots:                                             │ │
+│  │   ☑ Extract all 2 autopilots as entities               │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Step 4: Entity Versioning                                  │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ Auto-detect changes since last export:                 │ │
+│  │                                                        │ │
+│  │ agent/worker: last exported 2.0.0 → changes detected   │ │
+│  │   Version bump: [2.0.1 ▼] (auto)                       │ │
+│  │                                                        │ │
+│  │ agent/planner: last exported 1.0.0 → no changes        │ │
+│  │   Version: 1.0.0 (unchanged, will not re-export)      │ │
+│  │                                                        │ │
+│  │ skill/golang-testing: new entity (first export)        │ │
+│  │   Version: [1.0.0 ▼]                                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Sections to include:                                        │
+│  ☑ Agents  ☑ Skills  ☑ Autopilots  ☐ Projects  ☐ Labels   │
+│                                                              │
+│  Template name: [Web3Gate-team___________]                   │
+│                                                              │
+│  [◀ Back]                         [Preview] [Export & Save]  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.7 Menu / Navigation Changes
+
+```
+Sidebar (or top nav):
+
+  🏠 Templates        ← existing
+  🧩 Entity Browser   ← NEW
+  ⬇️  Import           ← existing
+  ⬆️  Export           ← existing
+  ⚙️  Settings         ← existing
+
+App.tsx routes:
+  /#/templates        → TemplatesView (with entity count badges)
+  /#/entities         → EntityBrowser (NEW)
+  /#/import           → ImportWizard (updated for v2)
+  /#/export           → ExportForm (updated with mode selection)
+  /#/settings         → SettingsView (add remote registry config)
+```
+
+### 10.8 Entity Browser: Skill Install Flow
+
+```
+User clicks [Install] on skill "golang-testing" in Entity Browser:
+
+┌──────────────────────────────────────────────────────────────┐
+│  Install Entity                                             │
+│                                                              │
+│  🛠 golang-testing@1.6.1                                    │
+│  ─────────────────────────────────────────────────────────── │
+│                                                              │
+│  This skill is not part of any agent's requirements.        │
+│  Installing a standalone skill requires you to manually     │
+│  assign it to agents after installation.                    │
+│                                                              │
+│  Target workspace: [Web3Gate ▼]                             │
+│                                                              │
+│  ☐ Also install dependencies (none)                        │
+│                                                              │
+│  Skills imported: 1                                         │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ 🟢 CREATE  golang-testing@1.6.1                        │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [Cancel]                               [Install to Workspace] │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.9 Entity Browser: Agent Install Flow (with transitive deps)
+
+```
+User clicks [Install] on agent "Worker" in Entity Browser:
+
+┌──────────────────────────────────────────────────────────────┐
+│  Install Entity                                             │
+│                                                              │
+│  🤖 Worker@2.0.1                                            │
+│  ─────────────────────────────────────────────────────────── │
+│                                                              │
+│  Target workspace: [Web3Gate ▼]                             │
+│                                                              │
+│  ℹ️ This agent requires 6 skills. They will be installed    │
+│     automatically from your local registry.                  │
+│                                                              │
+│  Dependency tree (8 entities total):                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ 🟢 CREATE  agent/worker@2.0.1                           │ │
+│  │   ├── 🟢 CREATE  skill/golang-testing@1.6.1             │ │
+│  │   ├── 🟢 CREATE  skill/python-pro@2.1.0                 │ │
+│  │   ├── 🟢 CREATE  skill/security-review@1.3.0            │ │
+│  │   ├── 🟡 UPDATE  skill/code-review@1.8.2 (exists → 1.8.2)│ │
+│  │   ├── ⚪ SKIP    skill/gh-cli (already at latest 1.2.0) │ │
+│  │   └── 🟢 CREATE  skill/frontend-design@1.4.1            │ │
+│  │ Runtime mapping: [Claude ▼]                             │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Env variables needed:                                       │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │ ANTHROPIC_AUTH_TOKEN  [••••••••••••••••]  (from secrets) │ │
+│  │ ANTHROPIC_BASE_URL    [https://api.anthropic.com▼]       │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ☑ Generate entity-lock.yaml                                │
+│                                                              │
+│  [Cancel]                               [Install All to Workspace] │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 10.10 Template Detail View (when viewing a template before import)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ◀ Back to Templates                                        │
+│                                                              │
+│  📦 Basic4Agent (v2.0 — mixed mode)                         │
+│  Standard 4-agent development team                          │
+│                                                              │
+│  ┌─ Inline Entities ───────────────────────────────────────┐ │
+│  │ Agent: Assistant  (deepseek-v4-pro, claude runtime)     │ │
+│  │ Agent: Planner     (auto, claude runtime)                │ │
+│  │                                                        │ │
+│  │ [+ 2 inline agents]                                     │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Entity References ─────────────────────────────────────┐ │
+│  │ agent/qa@1.5.0           ── QA verification agent       │ │
+│  │ autopilot/daily-sync@1.0 ── Daily scheduling            │ │
+│  │ agent/worker@2.0.1       ── Full-stack dev agent        │ │
+│  │                                                        │ │
+│  │ [+ 1 entity ref]                                        │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Projects ──────────────────────────────────────────────┐ │
+│  │ Main Project (active)                                   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─ Labels ────────────────────────────────────────────────┐ │
+│  │ 🔴 bug  🔵 feature                                      │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  [Import to Workspace ▼]  [Export as YAML]  [Edit Template]  │
+└──────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 10. File Structure After Refactoring
+---
+
+## 11. File Structure After Refactoring
 
 ```
 src/
@@ -861,47 +1408,638 @@ src/
 
 ---
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
-### 11.1 Unit Tests
+### 11.1 Test Architecture Principles
 
-| Module | Test Cases |
+| Principle | Description |
 |---|---|
-| `EntityValidator` | Valid entity passes; missing required field fails; invalid semver fails; circular dependency detected; cross-entity ref validation |
-| `EntityRegistry` | Save/load roundtrip; version listing; hash computation; delete; concurrent writes |
-| `DependencyResolver` | Flat dependency; deep transitive chain; shared dependency deduplication; version conflict detection; semver range intersection; topological sort correctness; circular dependency rejection; missing entity error |
-| `TemplateReader` (v2) | Parse v2 manifest; parse v1 (backward compat); parse mixed inline+ref; malformed template error |
-| `OverrideEngine` | Simple override; deep merge; protected field rejection; env var overlay |
+| **No real multica CLI in unit tests** | All CLI calls are mocked. Entity registry, resolver, import/export engines tested in isolation. |
+| **Real YAML files on disk for integration** | Integration tests use actual YAML files in temp directories, real `EntityRegistry` against `fs`, real `yaml.parse`. |
+| **Live multica CLI for E2E** | End-to-end tests spin up a real multica instance and run actual `multica agent create` etc. commands. |
+| **Test fixtures as versioned YAML** | Entity test fixtures live in `tests/fixtures/entities/` — they are valid entities that double as documentation. |
 
-### 11.2 Integration Tests
+### 11.2 Test File Organization
 
-| Scenario | Steps |
-|---|---|
-| Full v2 import | Create entities → create template → import → verify workspace state |
-| Partial entity import | Import just `agent/worker` → verify its skills auto-imported |
-| v1 backward compat | Import existing v1 template → works exactly as before |
-| Version upgrade | Import v1 agent → re-import with v2 (force-overwrite) → agent updated |
-| Conflict resolution | Create two agents with incompatible version constraints → verify resolution error |
-| Remote pull | Push entity to remote → pull from another machine → verify identical |
+```
+tests/
+├── unit/
+│   ├── entity-registry.test.ts         # EntityRegistry CRUD
+│   ├── entity-validator.test.ts        # EntityValidator rules
+│   ├── dependency-resolver.test.ts     # Resolution algorithm
+│   ├── override-engine.test.ts         # Merge semantics
+│   ├── template-reader.test.ts         # v1/v2/mixed parsing
+│   ├── template-writer.test.ts         # v1/v2/mixed writing
+│   └── import-engine.test.ts          # Import pipeline (mocked CLI)
+├── integration/
+│   ├── entity-import.test.ts           # Entity file → registry → workspace
+│   ├── template-v1-import.test.ts      # v1 template → workspace (backward compat)
+│   ├── template-v2-import.test.ts      # v2 template → workspace (entity refs)
+│   ├── template-mixed-import.test.ts   # Mixed inline + ref import
+│   ├── template-export.test.ts         # Workspace → template (all modes)
+│   ├── merge-inline-wins.test.ts       # Inline beats entity ref on conflict
+│   ├── skill-binding.test.ts           # Agent↔skill association
+│   ├── rollback-on-failure.test.ts     # Atomic import — partial failure rollback
+│   ├── version-upgrade.test.ts         # Entity version upgrade on re-import
+│   └── lockfile.test.ts               # entity-lock.yaml generation + respect
+├── e2e/
+│   ├── full-import-export.test.ts      # Real multica: export → import → verify
+│   ├── entity-lifecycle.test.ts        # Create → publish → pull → install → upgrade
+│   └── cross-template-reuse.test.ts    # Two templates share same entity
+└── fixtures/
+    ├── entities/
+    │   ├── skill-minimal-1.0.0.yaml
+    │   ├── skill-golang-testing-1.2.0.yaml
+    │   ├── agent-worker-2.0.1.yaml
+    │   ├── agent-worker-broken.yaml    # intentionally invalid
+    │   └── autopilot-daily-sync-1.0.0.yaml
+    └── templates/
+        ├── v1-basic.yaml               # v1 inline template
+        ├── v2-pure-ref.yaml            # v2 entity ref only, no inline
+        ├── v2-mixed.yaml               # v2 both inline + ref
+        └── v2-conflict.yaml            # v2 inline + ref with name collision
+```
 
-### 11.3 Edge Cases
+### 11.3 Unit Test Catalog
 
-| Edge Case | Expected Behavior |
-|---|---|
-| Empty skills list on agent | No skill resolution needed, import succeeds |
-| Agent refs non-existent skill | Resolution error with clear message |
-| Two autopilots ref same agent | Agent imported once, both autopilots created |
-| Circular: agent indirectly refs itself | Detected and rejected during validation |
-| Template with 0 entities (only projects/labels) | Valid template, import projects/labels only |
-| Entity file corrupted (invalid YAML) | Skip with warning, continue importing others |
-| Concurrent imports to same workspace | Workspace scanner snapshots state at start; second import wins for name collisions |
-| Hash mismatch on pinned entity | Block import, ask user to trust or re-fetch |
-| Entity with 100+ transitive deps | Performance: must resolve within 2 seconds |
-| Uninstall/reinstall of multica-templates | Registry persisted in `~/.multica/entities/`, survives npm uninstall |
+#### 11.3.1 EntityValidator
+
+```typescript
+describe('EntityValidator', () => {
+  describe('Schema validation', () => {
+    test('valid skill entity passes all checks')
+    test('valid agent entity passes all checks')
+    test('valid autopilot entity passes all checks')
+
+    test('rejects entity with missing required field (entity type discriminator)')
+    test('rejects entity with missing name')
+    test('rejects entity with missing version')
+    test('rejects entity with invalid semver version (e.g., "latest")')
+    test('rejects agent entity without instructions')
+    test('rejects skill entity without files or content')
+    test('rejects autopilot entity without agent_ref')
+
+    test('rejects entity with unknown schema_version (major version mismatch)')
+    test('accepts entity with compatible schema_version (v1.x)')
+  })
+
+  describe('Naming validation', () => {
+    test('rejects entity name containing ".."')
+    test('rejects entity name containing "/"')
+    test('rejects entity name containing "\\"')
+    test('rejects entity name starting with "."')
+    test('rejects entity name longer than 64 chars')
+    test('accepts valid kebab-case, snake_case, dot.separated names')
+    test('accepts namespaced refs: multica/skill/golang-testing')
+  })
+
+  describe('Cross-reference validation', () => {
+    test('agent refs valid skill → passes')
+    test('agent refs non-existent skill → passes (resolved at import time, not validate time)')
+    test('autopilot refs valid agent format → passes')
+    test('circular: agent indirectly refs itself via extends → detected and rejected')
+
+    test('skill file paths validated: rejects "../../../etc/passwd"')
+    test('skill file paths validated: rejects absolute paths')
+    test('skill file paths validated: accepts "SKILL.md", "advanced/guide.md"')
+  })
+
+  describe('Secret detection', () => {
+    test('rejects entity with API key pattern in instructions')
+    test('rejects entity with private key in instructions')
+    test('rejects entity with high-entropy base64 in custom_env_template values')
+    test('accepts entity with ${ENV_VAR} references (not secrets)')
+    test('accepts entity with instructions (no secrets)')
+  })
+
+  describe('Hash computation', () => {
+    test('same logical entity produces identical hash regardless of YAML formatting')
+    test('different entities produce different hashes')
+    test('key order in YAML does not affect hash (canonical sort)')
+    test('hash is stable across save/load roundtrip')
+  })
+})
+```
+
+#### 11.3.2 EntityRegistry
+
+```typescript
+describe('EntityRegistry', () => {
+  describe('save', () => {
+    test('saves entity to correct path: {type}/{name}/{version}.yaml')
+    test('updates .manifest.yaml with hash and imported_at')
+    test('creates intermediate directories if needed')
+    test('rejects saving entity with same version as existing (immutable)')
+    test('rejects saving entity with path traversal in name')
+  })
+
+  describe('load', () => {
+    test('loads entity by exact ref: agent/worker@2.0.1')
+    test('loads entity by name (latest version returned)')
+    test('throws for non-existent entity')
+    test('verifies hash on load, throws on mismatch')
+    test('loads entity after save roundtrip — data identical')
+  })
+
+  describe('list', () => {
+    test('lists all entities across all types')
+    test('filters by type: --type agent')
+    test('filters by name substring: --filter go')
+    test('empty registry returns empty list, not error')
+  })
+
+  describe('delete', () => {
+    test('deletes entity file and removes from manifest')
+    test('throws when deleting entity referenced by lockfile (protected)')
+    test('deleting non-existent entity throws')
+  })
+
+  describe('resolve', () => {
+    test('resolves exact version: agent/worker@2.0.1 → 2.0.1')
+    test('resolves latest: agent/worker → highest version')
+    test('throws when no version satisfies constraint')
+    test('returns versions sorted by semver')
+  })
+
+  describe('Manifest reconciliation', () => {
+    test('startup: file on disk not in manifest → flagged as "orphan"')
+    test('startup: entry in manifest missing on disk → warned, removed from manifest')
+    test('startup: clean manifest + matching files → no warnings')
+  })
+})
+```
+
+#### 11.3.3 DependencyResolver
+
+```typescript
+describe('DependencyResolver', () => {
+  describe('Flattening', () => {
+    test('single entity ref → single resolved entity')
+    test('entity with no dependencies → only itself resolved')
+    test('agent with 3 skill refs → agent + 3 skills resolved')
+    test('autopilot with agent_ref → autopilot + agent + transitived skills')
+    test('deep chain: autopilot → agent → skills → (no further deps)')
+  })
+
+  describe('Deduplication', () => {
+    test('two agents ref same skill → skill imported once')
+    test('two autopilots ref same agent → agent imported once')
+    test('template explicitly includes skill that agent also refs → imported once')
+    test('different version constraints on same entity → deduplicated to best version')
+  })
+
+  describe('Version solving', () => {
+    test('exact version match: 2.0.1 → 2.0.1')
+    test('multiple candidates → picks highest satisfying version')
+    test('no satisfying version → resolution error with clear message')
+    test('version constraint intersection: [^1.2, ^1.5] → 1.5+')
+    test('incompatible constraints → resolution error, lists both constraints')
+  })
+
+  describe('Topological sort', () => {
+    test('skills always ordered before agents that depend on them')
+    test('agents always ordered before autopilots that depend on them')
+    test('independent entities have no ordering constraints')
+  })
+
+  describe('Error handling', () => {
+    test('entity refs non-existent entity → resolution error')
+    test('entity file corrupted → resolution error with path')
+    test('hash mismatch → resolution error showing expected vs actual')
+    test('circular dependency → detected and rejected with cycle path')
+
+    test('100+ transitive deps → resolves within 2 seconds')
+    test('empty ref list → empty resolution, no error')
+  })
+})
+```
+
+#### 11.3.4 TemplateReader (v2 + mixed mode)
+
+```typescript
+describe('TemplateReader', () => {
+  describe('v1 templates (backward compat)', () => {
+    test('parses v1 template with inline agents')
+    test('parses v1 template with inline skills')
+    test('parses v1 template with inline autopilots')
+    test('v1 template produces empty includes.entities')
+  })
+
+  describe('v2 pure-ref templates', () => {
+    test('parses v2 template with entity refs only, no inline')
+    test('extracts refs from includes.entities')
+    test('extracts overrides from each entity ref')
+    test('extracts hash pins when present')
+  })
+
+  describe('v2 mixed templates (inline + ref)', () => {
+    test('parses template with 3 inline agents + 2 entity refs')
+    test('parses template with inline skills + entity-ref skills')
+    test('inline and ref sections are both populated in parsed result')
+    test('projects and labels parsed correctly in mixed mode')
+  })
+
+  describe('v2 inline-only templates', () => {
+    test('parses v2 template with only inline agents (no includes section)')
+    test('identical semantic result to v1 parsing of same content')
+  })
+
+  describe('Error handling', () => {
+    test('malformed YAML → parse error with line number')
+    test('missing name field → validation error')
+    test('entity ref without version → validation error')
+    test('unknown fields in includes.entities → warning, not error')
+  })
+})
+```
+
+#### 11.3.5 Override Engine
+
+```typescript
+describe('OverrideEngine', () => {
+  describe('Merge strategy', () => {
+    test('no overrides → entity defaults used as-is')
+    test('model override → overridden value takes effect')
+    test('visibility override → overridden value takes effect')
+    test('max_concurrent_tasks override → overridden value takes effect')
+    test('description override → overridden value takes effect')
+  })
+
+  describe('Additive overrides', () => {
+    test('skills: adding new skill → union of entity skills + override skills')
+    test('skills_remove: removing specific skill → subtracted from union')
+    test('skills_remove non-existent skill → no-op, warning')
+    test('custom_env_template: adding new var → merged')
+    test('custom_env_template: overriding existing var → override wins')
+  })
+
+  describe('Protected field rejection', () => {
+    test('overriding name → rejected')
+    test('overriding version → rejected')
+    test('overriding instructions → rejected')
+    test('overriding runtime_provider → rejected')
+    test('overriding mcp_config → rejected')
+    test('overriding custom_args → rejected')
+    test('overriding entity discriminator → rejected')
+    test('overriding schema_version → rejected')
+  })
+
+  describe('Deep vs shallow merge', () => {
+    test('custom_env_template: shallow merge (template keys override entity keys)')
+    test('skills: union merge (both sets combined)')
+    test('mcp_config: shallow merge (template version wins for same key)')
+  })
+})
+```
+
+#### 11.3.6 ImportEngine
+
+```typescript
+describe('ImportEngine', () => {
+  describe('v1 inline import', () => {
+    test('imports inline agents from v1 template')
+    test('imports inline skills from v1 template')
+    test('imports inline autopilots from v1 template')
+    test('dry run shows correct create/skip counts')
+    test('skip-existing skips existing agents by name')
+    test('force-overwrite updates existing agents')
+  })
+
+  describe('v2 entity-ref import', () => {
+    test('resolves and imports entity-ref agents')
+    test('resolves transitive skill dependencies')
+    test('dry run shows dependency tree')
+    test('entity not in registry → pull from remote or error')
+  })
+
+  describe('v2 mixed import (inline + ref)', () => {
+    test('imports both inline and ref agents together')
+    test('inline agent with same name as entity ref → inline wins, ref skipped')
+    test('inline skill with same name as entity ref skill → inline wins')
+    test('dry run shows both inline and ref items')
+  })
+
+  describe('Atomic import / rollback', () => {
+    test('all steps succeed → all entities created, no rollback')
+    test('step 3 of 5 fails → steps 1-2 rolled back')
+    test('rollback leaves workspace in pre-import state')
+    test('skill creation fails → no orphaned skills left behind')
+  })
+
+  describe('Lockfile', () => {
+    test('first import generates entity-lock.yaml')
+    test('subsequent import with same template respects lockfile versions')
+    test('entity upgrade updates lockfile entry')
+    test('lockfile hash mismatch → warning, user prompted')
+  })
+})
+```
+
+### 11.4 Integration Test Catalog
+
+#### 11.4.1 Entity Import
+
+```typescript
+describe('Entity import integration', () => {
+  test(
+    'import skill entity from YAML file → stored in local registry →'
+    + ' imported to workspace via CLI → skill appears in workspace'
+  );
+
+  test(
+    'import agent entity with 3 skill refs → all skills resolved →'
+    + ' agent created with correct skill bindings in workspace'
+  );
+
+  test(
+    'import autopilot entity → agent auto-imported →'
+    + ' agent skills auto-imported → autopilot created with resolved agent ID'
+  );
+
+  test(
+    'import entity with hash pin → hash verified → import succeeds'
+  );
+
+  test(
+    'import entity with wrong hash pin → hash mismatch error → import blocked'
+  );
+});
+```
+
+#### 11.4.2 Template v1 Import (Backward Compat)
+
+```typescript
+describe('v1 template backward compat', () => {
+  test(
+    'import existing v1 basic4agent.yaml → agents/skills/autopilots created correctly →'
+    + ' result identical to importing with v0.0.1 tool'
+  );
+
+  test(
+    'v1 template with only agents (no skills section) → agents imported, no errors'
+  );
+
+  test(
+    'v1 template dry-run → shows correct create/skip for all entity types'
+  );
+
+  test(
+    're-import v1 template with force-overwrite → agents updated in place'
+  );
+});
+```
+
+#### 11.4.3 Template v2 Import (Entity Refs)
+
+```typescript
+describe('v2 template import', () => {
+  test(
+    'template with 4 entity-ref agents → all resolved from registry →'
+    + ' all created in workspace with correct skill bindings'
+  );
+
+  test(
+    'template with entity-ref agents referencing skills →'
+    + ' skills auto-imported transitively → agent-skill bindings correct'
+  );
+
+  test(
+    'dry-run shows dependency tree: agents at top, skills indented below'
+  );
+
+  test(
+    'entity ref points to non-existent version → resolution error →'
+    + ' dry-run shows error before apply'
+  );
+});
+```
+
+#### 11.4.4 Mixed Mode Import (Inline + Ref)
+
+```typescript
+describe('Mixed mode import', () => {
+  test(
+    'template with 3 inline agents + 2 entity-ref agents →'
+    + ' all 5 created in workspace'
+  );
+
+  test(
+    'inline agent "Worker" + entity ref "agent/worker@2.0.1" →'
+    + ' inline Wins → entity ref skipped with warning → inline Worker imported'
+  );
+
+  test(
+    'inline skill "golang-testing" + entity ref "skill/golang-testing@1.2.0" →'
+    + ' inline wins → entity ref skill skipped'
+  );
+
+  test(
+    'template with entity ref only, no inline → import succeeds →'
+    + ' same result as pure-ref import'
+  );
+});
+```
+
+#### 11.4.5 Export Integration
+
+```typescript
+describe('Export integration', () => {
+  test(
+    'export workspace with 2 agents → inline mode → valid v1 template produced'
+  );
+
+  test(
+    'export workspace → reference mode → entities saved to registry →'
+    + ' template contains refs only'
+  );
+
+  test(
+    'export workspace → mixed mode → entities saved to registry →'
+    + ' template contains both inline (as-is) and refs'
+  );
+
+  test(
+    're-export same workspace with reference mode →'
+    + ' version auto-bumped if content changed'
+  );
+
+  test(
+    'export with include_transitive → template manifest includes'
+    + ' all transitive skill refs'
+  );
+});
+```
+
+#### 11.4.6 Merge & Conflict Resolution
+
+```typescript
+describe('Merge and conflict resolution', () => {
+  test(
+    'merge: inline agents [A, B] + entity refs [B, C] → final set: [A, B_inline, C]'
+  );
+
+  test(
+    'merge: inline skills [X] + entity ref skill [X] → inline X wins, warning emitted'
+  );
+
+  test(
+    'merge: no overlap → both sets imported independently'
+  );
+
+  test(
+    'merge: empty inline + 3 refs → only refs imported'
+  );
+
+  test(
+    'merge: 3 inline + empty refs → only inline imported (v1 behavior)'
+  );
+});
+```
+
+#### 11.4.7 Rollback on Failure
+
+```typescript
+describe('Atomic import rollback', () => {
+  test(
+    '3rd agent creation fails → first 2 agents deleted →'
+    + ' first 2 skills (already created) deleted → workspace unchanged'
+  );
+
+  test(
+    'skill binding fails after agent created → agent deleted → skills kept (safe)'
+  );
+
+  test(
+    'autopilot creation fails after agent imported → autopilot not created →'
+    + ' agent kept (autopilots are leaf nodes, safe to leave agent)'
+  );
+});
+```
+
+#### 11.4.8 Lockfile
+
+```typescript
+describe('Lockfile integration', () => {
+  test(
+    'first import → entity-lock.yaml created with exact versions + hashes'
+  );
+
+  test(
+    'second import same template → lockfile consulted → same versions used'
+  );
+
+  test(
+    'entity upgrade agent/worker → lockfile entry updated →'
+    + ' workspace agent updated to new version'
+  );
+
+  test(
+    'manual lockfile edit (tamper) → hash mismatch on next import → error with details'
+  );
+
+  test(
+    'import with --no-lockfile → lockfile ignored → resolves latest versions'
+  );
+});
+```
+
+### 11.5 End-to-End Test Catalog
+
+```typescript
+describe('E2E: Full import-export cycle', () => {
+  test(
+    'create workspace with 2 agents + 2 skills → export as v2 reference template →'
+    + ' import into fresh workspace → verify all agents/skills match'
+  );
+
+  test(
+    'export as v1 inline template → import into fresh workspace →'
+    + ' verify backward compat: all agents/skills identical to source'
+  );
+
+  test(
+    'export as v2 mixed template (1 inline agent + 2 entity refs) →'
+    + ' import into fresh workspace → all 3 agents present →'
+    + ' inline agent matches source, ref agents resolved from registry'
+  );
+});
+
+describe('E2E: Entity lifecycle', () => {
+  test(
+    'create Agent entity YAML → validate → save to registry →'
+    + ' install into workspace → verify agent exists →'
+    + ' create new version → upgrade workspace agent'
+  );
+
+  test(
+    'import agent from workspace → extract as entity →'
+    + ' validate entity → publish to remote registry →'
+    + ' pull from different machine → install → verify identical'
+  );
+});
+
+describe('E2E: Cross-template reuse', () => {
+  test(
+    'Template A exports Worker agent as entity v1.0.0 →'
+    + ' Template B references agent/worker@1.0.0 →'
+    + ' import Template B into fresh workspace →'
+    + ' Worker agent matches Template A export'
+  );
+
+  test(
+    'Update Worker entity to v1.1.0 →'
+    + ' re-import Template B → lockfile prevents auto-upgrade →'
+    + ' explicit entity upgrade → Worker updated to v1.1.0'
+  );
+});
+```
+
+### 11.6 Edge Case Matrix (for QA)
+
+| # | Scenario | Expected |
+|---|----------|----------|
+| 1 | Template with 0 agents, 0 skills, 0 autopilots (only projects/labels) | Import succeeds, no entity resolution needed |
+| 2 | Agent entity with empty skills map `{}` | Imported with no skill bindings |
+| 3 | Agent entity references skill not in registry | Resolution error with "pull from remote?" suggestion |
+| 4 | Two autopilots in template ref the same agent entity | Agent imported once, both autopilots created |
+| 5 | Entity YAML file is syntactically valid but not an entity (wrong schema) | Validation error with specific field violations |
+| 6 | Entity file on disk is 0 bytes (truncated) | Parse error with clear message |
+| 7 | Entity references 100+ transitive skills | Resolved within 2s; progress streaming works |
+| 8 | Concurrent imports to the same workspace from two sessions | Workspace scanner snapshots state at start; second import wins name collisions |
+| 9 | Lockfile references entity version no longer in registry | Warning: "Entity X@Y.Z is locked but not found. Use --upgrade to resolve." |
+| 10 | Template with `includes.entities` that's an empty array | Import succeeds, only inline entities processed |
+| 11 | Inline agent has same name as multiple entity ref agents (duplicate) | First ref skipped, duplicate ref also skipped |
+| 12 | override tries to set `skills_remove: [skill-not-present]` | Warning emitted, import continues |
+| 13 | Import with `--no-lockfile` flag | Lockfile not generated; always resolves latest |
+| 14 | Entity name with Unicode characters | Validated per allowlist; likely rejected unless explicitly allowed |
+| 15 | Uninstall/reinstall multica-templates tool | Entities survive in `~/.multica/entities/`; templates in `~/.multica/templates/` |
+
+### 11.7 Test Execution Strategy
+
+```bash
+# Unit tests (fast, no external deps, run on every change)
+npm run test:unit              # vitest --testPathPattern='tests/unit'
+
+# Integration tests (real filesystem, mocked multica CLI, run pre-commit)
+npm run test:integration       # vitest --testPathPattern='tests/integration'
+
+# E2E tests (real multica CLI, run in CI and pre-push)
+npm run test:e2e               # vitest --testPathPattern='tests/e2e'
+
+# All tests
+npm test                       # runs unit → integration → e2e in sequence
+```
+
+**Coverage targets**:
+| Layer | Coverage Target |
+|-------|----------------|
+| Unit tests | ≥ 85% line coverage |
+| Integration tests | Cover all major user flows (11.4 catalog) |
+| E2E tests | Cover critical paths (import, export, entity lifecycle) |
 
 ---
 
-## 12. Risk Assessment
+## 13. Risk Assessment
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
@@ -914,7 +2052,7 @@ src/
 
 ---
 
-## 13. Success Metrics
+## 14. Success Metrics
 
 | Metric | Current (v0.0.1) | Target (v1.0.0) |
 |---|---|---|
@@ -926,7 +2064,7 @@ src/
 
 ---
 
-## 14. Timeline Estimate
+## 15. Timeline Estimate
 
 | Phase | Effort | Cumulative |
 |---|---|---|
@@ -942,7 +2080,7 @@ src/
 
 ---
 
-## 15. Multi-Perspective Review & Resolution
+## 16. Multi-Perspective Review & Resolution
 
 This plan was reviewed from 4 independent perspectives: **Architecture**, **Security**, **Implementation Feasibility**, and **UX/Product Design**. Full review reports are available; this section synthesizes the critical findings and resolutions.
 
@@ -981,7 +2119,7 @@ This plan was reviewed from 4 independent perspectives: **Architecture**, **Secu
 |---|---------|------------|
 | M1 | `skip_missing` silently creates broken agent state | Gate behind `--force` flag. Emit prominent warning when skills are skipped. |
 | M2 | Semver range greediness — high version from low-priority remote wins | Prefer locally cached versions. When pulling, resolve within highest-trust remote first. |
-| M3 | `inline` entities create dual mental model in v2 | Removed from v2.0. Prototyping uses v1 format. Migration path is v1 → v2. |
+| M3 | `inline` entities create dual mental model in v2 | **REVERSED**: v2 is a superset. Inline definitions ARE the v1 format and remain first-class. The template v2 schema supports both inline and entity refs side-by-side. No forced migration. Users never lose the ability to inline. |
 | M4 | Dependency tree visualization arrives late (Phase 6) | Add `import dry-run --tree` text output in Phase 3. Graphical tree in Phase 6. |
 | M5 | No `entity edit` or entity iteration workflow | Add `entity fork <ref> --bump <major|minor|patch>` in Phase 2. |
 | M6 | `runtime_mapping` forces template-wide only | Allow per-entity `runtime_mapping` override within each entity ref in includes. |
