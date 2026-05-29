@@ -1,0 +1,11 @@
+entity: skill
+schema_version: "1.0"
+name: golang-testing
+version: 1.2.0
+description: Go testing patterns
+files:
+  - path: SKILL.md
+    content: "# Go Testing\n\nTable-driven tests with testify."
+metadata:
+  tags: [go, testing]
+

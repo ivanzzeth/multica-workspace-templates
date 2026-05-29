@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { readFileSync } from 'fs';
+import { parse as parseYaml } from 'yaml';
 import * as cli from '../services/cli.js';
 import { TemplateReader } from '../services/template-reader.js';
 import { TemplateWriter } from '../services/template-writer.js';
@@ -7,6 +9,9 @@ import { ImportEngine } from '../services/import-engine.js';
 import { ExportEngine } from '../services/export-engine.js';
 import { ServerStore } from '../services/server-store.js';
 import { SecretStore } from '../services/secret-store.js';
+import { EntityRegistry } from '../services/entity-registry.js';
+import { EntityValidator } from '../services/entity-validator.js';
+import { parseEntityRef } from '../types/entity.js';
 import type { ImportOptions, ExportOptions } from '../types/template.js';
 
 export async function createApiRouter() {
@@ -17,6 +22,8 @@ export async function createApiRouter() {
   const scanner = new WorkspaceScanner();
   const importer = new ImportEngine(reader, scanner);
   const exporter = new ExportEngine(scanner, writer, reader);
+  const registry = new EntityRegistry();
+  const validator = new EntityValidator();
   const servers = new ServerStore();
   servers.seed();
   const secrets = new SecretStore(servers);
@@ -296,6 +303,94 @@ export async function createApiRouter() {
       }
       const result = await exporter.apply(workspace_id, name, options as ExportOptions);
       res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Entity Browser ──
+
+  router.get('/entities', (req, res) => {
+    try {
+      const filter: any = {};
+      if (req.query.type) filter.type = req.query.type;
+      if (req.query.namespace) filter.namespace = req.query.namespace;
+      if (req.query.q) filter.name_contains = req.query.q;
+      if (req.query.source) filter.source = req.query.source;
+      const entities = registry.list(Object.keys(filter).length > 0 ? filter : undefined);
+      res.json({ entities });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/entities/:type/:name', (req, res) => {
+    try {
+      const version = req.query.version as string | undefined;
+      const namespace = (req.query.namespace as string) || 'multica';
+      const refStr = `${namespace}/${req.params.type}/${req.params.name}` + (version ? `@${version}` : '');
+      const ref = parseEntityRef(refStr);
+      const entity = registry.loadByRef(ref);
+      res.json({ entity, ref: refStr });
+    } catch (err: any) {
+      res.status(404).json({ error: err.message });
+    }
+  });
+
+  router.post('/entities/validate', (req, res) => {
+    try {
+      const { content, file_path } = req.body;
+      let result;
+      if (file_path) {
+        result = validator.validateFile(file_path);
+      } else if (content) {
+        result = validator.validateString(content);
+      } else {
+        res.status(400).json({ error: 'Provide content or file_path' });
+        return;
+      }
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/entities/import', (req, res) => {
+    try {
+      const { content, file_path } = req.body;
+      if (!content && !file_path) {
+        res.status(400).json({ error: 'Provide content or file_path' });
+        return;
+      }
+
+      // Validate first
+      const vr = file_path ? validator.validateFile(file_path) : validator.validateString(content);
+      if (!vr.valid) {
+        res.status(400).json({ error: 'Entity validation failed', validation: vr });
+        return;
+      }
+
+      // Parse and save
+      const raw = file_path
+        ? parseYaml(readFileSync(file_path, 'utf-8'), { maxAliasCount: 100 })
+        : parseYaml(content, { maxAliasCount: 100 });
+
+      // Normalize: ensure namespace is set
+      if (!raw.namespace) raw.namespace = 'multica';
+
+      const entry = registry.save(raw as import('../types/entity.js').Entity);
+      res.json({ ok: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete('/entities/:type/:name/:version', (req, res) => {
+    try {
+      const namespace = (req.query.namespace as string) || 'multica';
+      const refStr = `${namespace}/${req.params.type}/${req.params.name}@${req.params.version}`;
+      registry.delete(refStr);
+      res.json({ ok: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

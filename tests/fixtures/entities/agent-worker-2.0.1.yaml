@@ -1,0 +1,18 @@
+entity: agent
+schema_version: "1.0"
+name: worker
+version: 2.0.1
+description: Full-stack development agent
+instructions: "# Multica Worker Agent\n\nYou are the Worker. Develop and test code."
+model: auto
+runtime_provider: claude
+visibility: private
+max_concurrent_tasks: 6
+custom_env_template:
+  ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN}
+skills:
+  golang-testing: ^1.2.0
+  python-pro: ^2.0.0
+metadata:
+  tags: [development, fullstack]
+
