@@ -479,4 +479,79 @@ describe('EntityRegistry', () => {
       expect(registry.exists('skill/orphan-skill@1.0.0')).toBe(true);
     });
   });
+
+  // ── Fork & Upgrade ──
+
+  describe('fork', () => {
+    test('fork skill with patch bump creates new version', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.0.0' }));
+      const entry = registry.fork('skill/test@1.0.0', 'patch');
+      expect(entry.ref).toContain('skill/test@1.0.1');
+      const loaded = registry.load('skill/test@1.0.1');
+      expect(loaded.version).toBe('1.0.1');
+      expect(loaded.name).toBe('test');
+    });
+
+    test('fork with minor bump resets patch', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.2.3' }));
+      const entry = registry.fork('skill/test@1.2.3', 'minor');
+      expect(entry.ref).toContain('@1.3.0');
+    });
+
+    test('fork with major bump resets minor and patch', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.2.3' }));
+      const entry = registry.fork('skill/test@1.2.3', 'major');
+      expect(entry.ref).toContain('@2.0.0');
+    });
+
+    test('fork applies optional changes', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.0.0', description: 'Old desc' }));
+      registry.fork('skill/test@1.0.0', 'patch', { description: 'New desc' } as any);
+      const loaded = registry.load('skill/test@1.0.1') as SkillEntity;
+      expect(loaded.description).toBe('New desc');
+    });
+
+    test('fork preserves original entity data', () => {
+      const agent = makeAgent({ name: 'worker', version: '1.0.0', skills: { 's1': '^1.0' } });
+      registry.save(agent);
+      registry.fork('agent/worker@1.0.0', 'patch');
+      const original = registry.load('agent/worker@1.0.0') as AgentEntity;
+      expect(original.version).toBe('1.0.0');
+      expect(original.skills).toEqual({ 's1': '^1.0' });
+      const forked = registry.load('agent/worker@1.0.1') as AgentEntity;
+      expect(forked.version).toBe('1.0.1');
+      expect(forked.skills).toEqual({ 's1': '^1.0' });
+    });
+  });
+
+  describe('upgrade', () => {
+    test('upgrade pins new version in lockfile', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.0.0' }));
+      registry.save(makeSkill({ name: 'test', version: '1.1.0' }));
+
+      // Create initial lockfile with old version
+      registry.writeLockfile('ws-1', {
+        'skill/test': { version: '1.0.0', hash: 'sha256:old' },
+      });
+
+      const result = registry.upgrade('skill/test', 'ws-1');
+      expect(result.version).toBe('1.1.0');
+      expect(result.previous_version).toBe('1.0.0');
+
+      const lf = registry.readLockfile('ws-1');
+      expect(lf!.pinned['skill/test']).toBeDefined();
+      expect(lf!.pinned['skill/test'].version).toBe('1.1.0');
+    });
+
+    test('upgrade when already at latest returns no previous_version', () => {
+      registry.save(makeSkill({ name: 'test', version: '1.0.0' }));
+      registry.writeLockfile('ws-2', {
+        'skill/test': { version: '1.0.0', hash: 'sha256:abc' },
+      });
+
+      const result = registry.upgrade('skill/test', 'ws-2');
+      expect(result.version).toBe('1.0.0');
+      expect(result.previous_version).toBeUndefined();
+    });
+  });
 });

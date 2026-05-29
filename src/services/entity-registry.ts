@@ -616,4 +616,116 @@ export class EntityRegistry {
   getManifestPath(): string {
     return this.manifestPath;
   }
+
+  // ── Entity Fork ──
+
+  /**
+   * Fork an existing entity to a new version.
+   *
+   * Copies the entity content, bumps the version, and saves as a new entity.
+   *
+   * @param refStr - Source entity ref (e.g., 'skill/test@1.0.0')
+   * @param bump - Which part of the version to bump: 'major', 'minor', or 'patch'
+   * @param changes - Optional partial overrides for the new version
+   * @returns The manifest entry of the newly created entity
+   */
+  fork(
+    refStr: EntityRefString,
+    bump: 'major' | 'minor' | 'patch' = 'patch',
+    changes?: Partial<Entity>,
+  ): EntityManifestEntry {
+    const source = this.load(refStr);
+    const ref = parseEntityRef(refStr);
+    const currentVersion = ref.version || source.version;
+
+    // Compute new version
+    const parts = currentVersion.split('.');
+    let major = parseInt(parts[0] || '0', 10);
+    let minor = parseInt(parts[1] || '0', 10);
+    let patch = parseInt(parts[2] || '0', 10);
+
+    switch (bump) {
+      case 'major':
+        major += 1;
+        minor = 0;
+        patch = 0;
+        break;
+      case 'minor':
+        minor += 1;
+        patch = 0;
+        break;
+      case 'patch':
+        patch += 1;
+        break;
+    }
+
+    const newVersion = `${major}.${minor}.${patch}`;
+
+    // Clone the entity and apply changes
+    const newEntity: Entity = JSON.parse(JSON.stringify(source));
+    newEntity.version = newVersion;
+
+    if (changes) {
+      Object.assign(newEntity, changes);
+    }
+
+    return this.save(newEntity);
+  }
+
+  // ── Entity Upgrade ──
+
+  /**
+   * Upgrade an entity in a workspace lockfile to a newer version.
+   *
+   * This does NOT modify the workspace itself (that's done by the ImportEngine).
+   * It only updates the lockfile to pin the new version for future imports.
+   *
+   * @param refStr - The entity ref to upgrade (e.g., 'skill/test' or 'skill/test@^1.2')
+   * @param workspaceId - Target workspace
+   * @returns The new version + hash
+   */
+  upgrade(
+    refStr: EntityRefString,
+    workspaceId: string,
+  ): { ref: string; version: string; hash: string; previous_version?: string } {
+    const parsed = parseEntityRef(refStr);
+
+    // Resolve the latest/best version
+    const newVersion = this.resolve(parsed);
+    const versionedRef = serializeEntityRef({ ...parsed, version: newVersion });
+    const entity = this.load(versionedRef);
+    const hash = hashEntity(entity);
+
+    // Read existing lockfile to find previous pinned version
+    const existing = this.readLockfile(workspaceId);
+    let previousVersion: string | undefined;
+
+    if (existing) {
+      // Find the old entry — try different key formats
+      const oldKey = serializeEntityRef({ ...parsed, version: undefined });
+      for (const key of Object.keys(existing.pinned)) {
+        try {
+          const lockedRef = parseEntityRef(key);
+          if (lockedRef.type === parsed.type && lockedRef.name === parsed.name) {
+            previousVersion = existing.pinned[key].version;
+            break;
+          }
+        } catch { continue; }
+      }
+    }
+
+    // Update lockfile
+    const refKey = serializeEntityRef({ ...parsed, version: undefined });
+    this.writeLockfile(workspaceId, {
+      [refKey]: { version: newVersion, hash },
+    });
+
+    return {
+      ref: versionedRef,
+      version: newVersion,
+      hash,
+      previous_version: previousVersion && previousVersion !== newVersion
+        ? previousVersion : undefined,
+    };
+  }
 }
