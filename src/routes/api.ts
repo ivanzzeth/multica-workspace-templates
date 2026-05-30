@@ -169,61 +169,68 @@ export async function createApiRouter() {
       }
 
       const extracted: string[] = [];
+      const templateSkills = template.skills || [];
 
-      // Extract agents
+      // Helper: extract a single skill from template if it exists
+      function extractSkill(skillName: string): boolean {
+        if (extracted.some((r) => r === `skill/${skillName}@1.0.0`)) return true;
+        if (registry.exists(`skill/${skillName}@1.0.0`)) return true;
+        const skill = templateSkills.find((s: any) => s.name === skillName);
+        if (!skill) return false;
+        try {
+          registry.save({
+            entity: 'skill', schema_version: '1.0', name: skill.name, version: '1.0.0',
+            description: skill.description, config: skill.config,
+            files: skill.files?.map((f: any) => ({ path: f.path, content: f.content })),
+          });
+          extracted.push(`skill/${skillName}@1.0.0`);
+        } catch {}
+        return true;
+      }
+
+      // Extract agents (auto-extract their referenced skills)
       for (const name of agentNames) {
         const agent = template.agents.find((a: any) => a.name === name);
-        if (!agent) {
-          res.status(404).json({ error: `Agent "${name}" not found in template` });
-          return;
-        }
-        const entity: any = {
+        if (!agent) { res.status(404).json({ error: `Agent "${name}" not found in template` }); return; }
+        if (agent.skills?.length) for (const sn of agent.skills as string[]) extractSkill(sn);
+        registry.save({
           entity: 'agent', schema_version: '1.0', name: agent.name, version: '1.0.0',
           description: agent.description, instructions: agent.instructions,
           model: agent.model, runtime_provider: agent.runtime_provider,
           visibility: agent.visibility || 'private',
           custom_args: agent.custom_args?.length ? agent.custom_args : undefined,
           custom_env_template: agent.custom_env_template,
-          skills: agent.skills?.length
-            ? Object.fromEntries((agent.skills as string[]).map((s: string) => [s, '^1.0.0']))
-            : undefined,
-        };
-        registry.save(entity);
+          skills: agent.skills?.length ? Object.fromEntries((agent.skills as string[]).map((s) => [s, '^1.0.0'])) : undefined,
+        });
         extracted.push(`agent/${name}@1.0.0`);
       }
 
       // Extract skills
-      for (const name of skillNames) {
-        const skill = (template.skills || []).find((s: any) => s.name === name);
-        if (!skill) {
-          res.status(404).json({ error: `Skill "${name}" not found in template` });
-          return;
-        }
-        const entity: any = {
-          entity: 'skill', schema_version: '1.0', name: skill.name, version: '1.0.0',
-          description: skill.description,
-          config: skill.config,
-          files: skill.files?.map((f: any) => ({ path: f.path, content: f.content })),
-        };
-        registry.save(entity);
-        extracted.push(`skill/${name}@1.0.0`);
-      }
+      for (const name of skillNames) extractSkill(name);
 
-      // Extract autopilots
+      // Extract autopilots (auto-extract their agent + agent's skills)
       for (const name of autopilotNames) {
         const ap = template.autopilots.find((a: any) => a.title === name);
-        if (!ap) {
-          res.status(404).json({ error: `Autopilot "${name}" not found in template` });
-          return;
+        if (!ap) { res.status(404).json({ error: `Autopilot "${name}" not found in template` }); return; }
+        const agentName = ap.agent_ref;
+        const agent = template.agents.find((a: any) => a.name === agentName);
+        if (agent && !extracted.some((r) => r.startsWith(`agent/${agentName}@`))) {
+          if (agent.skills?.length) for (const sn of agent.skills as string[]) extractSkill(sn);
+          registry.save({
+            entity: 'agent', schema_version: '1.0', name: agent.name, version: '1.0.0',
+            description: agent.description, instructions: agent.instructions,
+            model: agent.model, runtime_provider: agent.runtime_provider,
+            visibility: agent.visibility || 'private',
+            skills: agent.skills?.length ? Object.fromEntries((agent.skills as string[]).map((s) => [s, '^1.0.0'])) : undefined,
+          });
+          extracted.push(`agent/${agentName}@1.0.0`);
         }
-        const entity: any = {
+        registry.save({
           entity: 'autopilot', schema_version: '1.0',
           name: ap.title.toLowerCase().replace(/\s+/g, '-'), version: '1.0.0',
-          title: ap.title, description: ap.description,
-          mode: ap.mode, agent_ref: `agent/${ap.agent_ref}@^1.0.0`,
-          triggers: ap.triggers,
-        };
-        registry.save(entity);
+          title: ap.title, description: ap.description, mode: ap.mode,
+          agent_ref: `agent/${ap.agent_ref}@^1.0.0`, triggers: ap.triggers,
+        });
         extracted.push(`autopilot/${ap.title}@1.0.0`);
       }
 
