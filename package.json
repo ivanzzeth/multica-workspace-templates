@@ -25,7 +25,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run --dir tests/unit",
-    "test:integration": "vitest run --dir tests/integration"
+    "test:integration": "vitest run --dir tests/integration",
+    "test:e2e": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
@@ -35,6 +36,7 @@
     "yaml": "^2.7.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/express": "^5.0.1",
     "@types/node": "^22.14.1",
     "@types/react": "^19.1.2",

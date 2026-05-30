@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { useApi, EntitySummary } from '../hooks/useApi.js';
 
 interface Props {
@@ -73,7 +73,9 @@ export function EntityBrowser({ api }: Props) {
   }, []);
 
   // Load on mount
-  if (!loaded) loadEntities();
+  useEffect(() => {
+    loadEntities();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (detail) {
     return <EntityDetail entity={detail.entity} refStr={detail.ref} onBack={() => { setDetail(null); setError(null); }} api={api} />;
