@@ -33,6 +33,7 @@ export function TemplatesView({ api }: Props) {
     return (
       <TemplateDetailView
         template={detail}
+        api={api}
         onBack={() => { setDetail(null); setError(null); }}
       />
     );
@@ -71,7 +72,72 @@ export function TemplatesView({ api }: Props) {
   );
 }
 
-function TemplateDetailView({ template, onBack }: { template: TemplateDetail; onBack: () => void }) {
+function TemplateDetailView({ template, api, onBack }: { template: TemplateDetail; api: ReturnType<typeof useApi>; onBack: () => void }) {
+  const [extracting, setExtracting] = useState<Record<string, 'idle' | 'loading' | 'done' | 'error'>>({});
+  const [extractMsg, setExtractMsg] = useState<string | null>(null);
+
+  const doExtract = useCallback(async (type: 'agent' | 'skill' | 'autopilot', name: string) => {
+    setExtractMsg(null);
+    const key = `${type}-${name}`;
+    setExtracting((prev) => ({ ...prev, [key]: 'loading' }));
+    try {
+      const payload: any = { agents: [], skills: [], autopilots: [] };
+      if (type === 'agent') payload.agents = [name];
+      else if (type === 'skill') payload.skills = [name];
+      else payload.autopilots = [name];
+      const result = await api.extractEntities(template.name, payload.agents, payload.skills, payload.autopilots);
+      setExtracting((prev) => ({ ...prev, [key]: 'done' }));
+      setExtractMsg(`✅ Extracted: ${result.extracted.join(', ')}`);
+      setTimeout(() => setExtractMsg(null), 4000);
+    } catch (e: any) {
+      setExtracting((prev) => ({ ...prev, [key]: 'error' }));
+      setExtractMsg(`❌ ${e.message}`);
+      setTimeout(() => setExtractMsg(null), 4000);
+    }
+  }, [template.name, api]);
+
+  const extractAll = useCallback(async () => {
+    setExtractMsg(null);
+    const agentNames = template.agents.map((a) => a.name);
+    const skillNames = (template.skills || []).map((s) => s.name);
+    const apNames = template.autopilots.map((a) => a.title);
+    if (agentNames.length === 0 && skillNames.length === 0 && apNames.length === 0) return;
+
+    // Mark all as loading
+    const loading: Record<string, 'loading'> = {};
+    agentNames.forEach((n) => { loading[`agent-${n}`] = 'loading'; });
+    skillNames.forEach((n) => { loading[`skill-${n}`] = 'loading'; });
+    apNames.forEach((n) => { loading[`autopilot-${n}`] = 'loading'; });
+    setExtracting(loading);
+
+    try {
+      const result = await api.extractEntities(template.name, agentNames, skillNames, apNames);
+      const done: Record<string, 'done'> = {};
+      agentNames.forEach((n) => { done[`agent-${n}`] = 'done'; });
+      skillNames.forEach((n) => { done[`skill-${n}`] = 'done'; });
+      apNames.forEach((n) => { done[`autopilot-${n}`] = 'done'; });
+      setExtracting(done);
+      setExtractMsg(`✅ Extracted ${result.extracted.length} entities`);
+      setTimeout(() => setExtractMsg(null), 4000);
+    } catch (e: any) {
+      setExtractMsg(`❌ ${e.message}`);
+      setTimeout(() => setExtractMsg(null), 4000);
+    }
+  }, [template, api]);
+
+  const extractBtn = (type: 'agent' | 'skill' | 'autopilot', name: string) => {
+    const key = `${type}-${name}`;
+    const state = extracting[key] || 'idle';
+    if (state === 'loading') return <span className="badge" style={{ background: '#eab308' }}>⏳</span>;
+    if (state === 'done') return <span className="badge" style={{ background: '#22c55e' }}>✅</span>;
+    if (state === 'error') return <span className="badge" style={{ background: '#ef4444' }}>❌</span>;
+    return (
+      <button className="btn btn-small" onClick={(e) => { e.stopPropagation(); doExtract(type, name); }}
+              style={{ fontSize: 11, padding: '2px 8px' }}>
+        Extract
+      </button>
+    );
+  };
   return (
     <div>
       <button className="btn btn-back" onClick={onBack}>← Back to list</button>
@@ -80,6 +146,12 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
       <div className="card" style={{ marginTop: 16 }}>
         <h2>{template.name} <span className="version-badge">v{template.version}</span></h2>
         <p className="hint">{template.description}</p>
+        {extractMsg && <div className="success-banner" style={{ margin: '8px 0', fontSize: 13 }}>{extractMsg}</div>}
+        {(template.agents.length > 0 || (template.skills?.length ?? 0) > 0 || template.autopilots.length > 0) && (
+          <button className="btn btn-small" onClick={extractAll} style={{ marginTop: 8, fontSize: 12 }}>
+            🔄 Extract all as entities
+          </button>
+        )}
         <div className="result-summary" style={{ marginTop: 12 }}>
           <div className="result-stat ok"><span className="stat-num">{template.agents.length}</span><span className="stat-label">Agents</span></div>
           <div className="result-stat ok"><span className="stat-num">{template.skills?.length || 0}</span><span className="stat-label">Skills</span></div>
@@ -96,7 +168,7 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
           <p className="hint">{template.skills.length} skill{template.skills.length > 1 ? 's' : ''} defined in this template.</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {template.skills.map((s) => (
-              <SkillCard key={s.name} skill={s} />
+              <SkillCard key={s.name} skill={s} extractBtn={extractBtn('skill', s.name)} />
             ))}
           </div>
         </div>
@@ -114,11 +186,12 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
               <th>Runtime</th>
               <th>Skills</th>
               <th>Env</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {template.agents.map((a) => (
-              <AgentRow key={a.name} agent={a} />
+              <AgentRow key={a.name} agent={a} extractBtn={extractBtn('agent', a.name)} />
             ))}
           </tbody>
         </table>
@@ -171,7 +244,10 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
           <h2>Autopilots</h2>
           {template.autopilots.map((ap) => (
             <div key={ap.title} className="dry-item" style={{ display: 'block', padding: '10px 12px', marginBottom: 8 }}>
-              <strong style={{ fontSize: 13 }}>{ap.title}</strong>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 13 }}>{ap.title}</strong>
+                {extractBtn('autopilot', ap.title)}
+              </div>
               <span className="reason" style={{ fontSize: 11 }}>
                 → {ap.agent_ref} · {ap.mode}
               </span>
@@ -194,7 +270,7 @@ function TemplateDetailView({ template, onBack }: { template: TemplateDetail; on
   );
 }
 
-function SkillCard({ skill }: { skill: NonNullable<TemplateDetail['skills']>[number] }) {
+function SkillCard({ skill, extractBtn }: { skill: NonNullable<TemplateDetail['skills']>[number]; extractBtn: React.ReactNode }) {
   const [showFiles, setShowFiles] = useState(false);
   const hasFiles = skill.files && skill.files.length > 0;
   const hasConfig = skill.config && Object.keys(skill.config).length > 0;
@@ -208,6 +284,7 @@ function SkillCard({ skill }: { skill: NonNullable<TemplateDetail['skills']>[num
             {skill.description}
           </span>
         </div>
+        <div>{extractBtn}</div>
       </div>
       {hasConfig && (
         <div style={{ marginTop: 8 }}>
@@ -235,7 +312,7 @@ function SkillCard({ skill }: { skill: NonNullable<TemplateDetail['skills']>[num
   );
 }
 
-function AgentRow({ agent }: { agent: TemplateDetail['agents'][number] }) {
+function AgentRow({ agent, extractBtn }: { agent: TemplateDetail['agents'][number]; extractBtn: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const envKeys = agent.custom_env_template ? Object.keys(agent.custom_env_template) : [];
 
@@ -247,6 +324,7 @@ function AgentRow({ agent }: { agent: TemplateDetail['agents'][number] }) {
         <td><span className="badge-provider">{agent.runtime_provider}</span></td>
         <td>{agent.skills?.length ? <span className="badge">{agent.skills.length}</span> : '—'}</td>
         <td>{envKeys.length > 0 ? <span className="badge">{envKeys.length}</span> : '—'}</td>
+        <td onClick={(e) => e.stopPropagation()}>{extractBtn}</td>
       </tr>
       {expanded && (
         <tr className="agent-detail-row">

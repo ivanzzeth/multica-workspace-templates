@@ -416,6 +416,17 @@ export function useApi() {
     return data as { ok: boolean; entry: any };
   }, []);
 
+  const extractEntities = useCallback(async (templateName: string, agents?: string[], skills?: string[], autopilots?: string[]) => {
+    const res = await fetch(`/api/templates/${encodeURIComponent(templateName)}/extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agents, skills, autopilots }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || JSON.stringify(data));
+    return data as { ok: boolean; extracted: string[] };
+  }, []);
+
   const deleteEntity = useCallback(async (type: string, name: string, version: string, namespace?: string) => {
     const params = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
     const res = await fetch(`/api/entities/${encodeURIComponent(type)}/${encodeURIComponent(name)}/${encodeURIComponent(version)}${params}`, { method: 'DELETE' });
@@ -448,6 +459,7 @@ export function useApi() {
     fetchEntity,
     validateEntity,
     importEntity,
+    extractEntities,
     deleteEntity,
   };
 }
