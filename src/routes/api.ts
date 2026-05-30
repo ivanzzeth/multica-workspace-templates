@@ -152,6 +152,87 @@ export async function createApiRouter() {
     }
   });
 
+  // Extract entities from a template (inline → entity file)
+  router.post('/templates/:name/extract', (req, res) => {
+    try {
+      const template = reader.readTemplate(req.params.name);
+      const { agents, skills, autopilots } = req.body || {};
+
+      // Normalize: arrays of names to extract
+      const agentNames: string[] = agents || [];
+      const skillNames: string[] = skills || [];
+      const autopilotNames: string[] = autopilots || [];
+
+      if (agentNames.length === 0 && skillNames.length === 0 && autopilotNames.length === 0) {
+        res.status(400).json({ error: 'Specify at least one entity name to extract: agents, skills, or autopilots' });
+        return;
+      }
+
+      const extracted: string[] = [];
+
+      // Extract agents
+      for (const name of agentNames) {
+        const agent = template.agents.find((a: any) => a.name === name);
+        if (!agent) {
+          res.status(404).json({ error: `Agent "${name}" not found in template` });
+          return;
+        }
+        const entity: any = {
+          entity: 'agent', schema_version: '1.0', name: agent.name, version: '1.0.0',
+          description: agent.description, instructions: agent.instructions,
+          model: agent.model, runtime_provider: agent.runtime_provider,
+          visibility: agent.visibility || 'private',
+          custom_args: agent.custom_args?.length ? agent.custom_args : undefined,
+          custom_env_template: agent.custom_env_template,
+          skills: agent.skills?.length
+            ? Object.fromEntries((agent.skills as string[]).map((s: string) => [s, '^1.0.0']))
+            : undefined,
+        };
+        registry.save(entity);
+        extracted.push(`agent/${name}@1.0.0`);
+      }
+
+      // Extract skills
+      for (const name of skillNames) {
+        const skill = (template.skills || []).find((s: any) => s.name === name);
+        if (!skill) {
+          res.status(404).json({ error: `Skill "${name}" not found in template` });
+          return;
+        }
+        const entity: any = {
+          entity: 'skill', schema_version: '1.0', name: skill.name, version: '1.0.0',
+          description: skill.description,
+          config: skill.config,
+          files: skill.files?.map((f: any) => ({ path: f.path, content: f.content })),
+        };
+        registry.save(entity);
+        extracted.push(`skill/${name}@1.0.0`);
+      }
+
+      // Extract autopilots
+      for (const name of autopilotNames) {
+        const ap = template.autopilots.find((a: any) => a.title === name);
+        if (!ap) {
+          res.status(404).json({ error: `Autopilot "${name}" not found in template` });
+          return;
+        }
+        const entity: any = {
+          entity: 'autopilot', schema_version: '1.0',
+          name: ap.title.toLowerCase().replace(/\s+/g, '-'), version: '1.0.0',
+          title: ap.title, description: ap.description,
+          mode: ap.mode, agent_ref: `agent/${ap.agent_ref}@^1.0.0`,
+          triggers: ap.triggers,
+        };
+        registry.save(entity);
+        extracted.push(`autopilot/${ap.title}@1.0.0`);
+      }
+
+      res.json({ ok: true, extracted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Runtimes ──
 
   router.get('/runtimes', async (req, res) => {
@@ -301,8 +382,15 @@ export async function createApiRouter() {
         res.status(400).json({ error: 'Missing workspace_id or name' });
         return;
       }
-      const result = await exporter.apply(workspace_id, name, options as ExportOptions);
-      res.json(result);
+      const exportOpts = options || {};
+      // Accept both old ExportOptions and new ExportOptionsV2
+      if (exportOpts.mode) {
+        const result = await exporter.apply(workspace_id, name, exportOpts);
+        res.json(result);
+      } else {
+        const result = await exporter.apply(workspace_id, name, exportOpts);
+        res.json(result);
+      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

@@ -343,4 +343,22 @@ test.describe('API Endpoints', () => {
     // Server might return 500 if no multica CLI, but it should respond
     expect([200, 500]).toContain(res.status());
   });
+
+  test('template entity extract API works', async ({ request }) => {
+    // Use Basic4Agent which exists in the real templates directory
+    const res = await request.post(`${BASE}/api/templates/Basic4Agent/extract`, {
+      data: { agents: ['Assistant'] },
+    });
+    expect(res.ok()).toBe(true);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.extracted[0]).toContain('agent/Assistant');
+  });
+
+  test('extract requires at least one entity', async ({ request }) => {
+    const res = await request.post(`${BASE}/api/templates/Basic4Agent/extract`, {
+      data: { agents: [], skills: [], autopilots: [] },
+    });
+    expect(res.status()).toBe(400);
+  });
 });
