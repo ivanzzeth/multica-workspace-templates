@@ -12,9 +12,15 @@ export async function createExpressApp(isDev: boolean) {
   const app = express();
   app.use(express.json());
 
-  // Mount API routes
+  // Mount API routes BEFORE Vite — must catch all /api/* before SPA fallback
   const apiRouter = await createApiRouter();
   app.use('/api', apiRouter);
+
+  // API error handler: ensure API errors never leak to Vite's SPA fallback
+  app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[API Error]', err.message || err);
+    res.status(500).json({ error: 'Internal server error' });
+  });
 
   if (isDev) {
     const vite = await createViteServer({
@@ -25,7 +31,8 @@ export async function createExpressApp(isDev: boolean) {
   } else {
     const clientDir = resolve(__dirname, '../dist/client');
     app.use(express.static(clientDir));
-    app.get('/{*path}', (_req, res) => {
+    // SPA fallback — only for non-API routes
+    app.get(/^\/(?!api\/).*/, (_req, res) => {
       const indexPath = join(clientDir, 'index.html');
       if (existsSync(indexPath)) {
         res.sendFile(indexPath);
