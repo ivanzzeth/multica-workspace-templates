@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { useApi, EntitySummary } from '../hooks/useApi.js';
+import { EntityEditor } from './EntityEditor.js';
 
 interface Props {
   api: ReturnType<typeof useApi>;
@@ -134,7 +135,6 @@ export function EntityBrowser({ api }: Props) {
 function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: string; onBack: () => void; api: ReturnType<typeof useApi> }) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editContent, setEditContent] = useState('');
   const [editResult, setEditResult] = useState<string | null>(null);
 
   const doDelete = async () => {
@@ -143,28 +143,17 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
   };
 
   const startEdit = () => {
-    setEditContent(JSON.stringify(entity, null, 2));
     setEditing(true);
     setEditResult(null);
   };
 
-  const saveEdit = async () => {
+  const saveEdit = async (updated: any) => {
     setEditResult(null);
     try {
-      // Validate the edited JSON
-      const validation = await api.validateEntity(editContent);
-      if (!validation.valid) {
-        setEditResult('❌ Validation failed:\n' + validation.issues.map((i) => `  ${i.field}: ${i.message}`).join('\n'));
-        return;
-      }
-      // Fork current entity to get a bumped version
       const curRef = `${entity.entity}/${entity.name}@${entity.version}`;
       const forkResult = await api.forkEntity(curRef, 'patch');
-      // Parse the edited content and remove version (let fork supply it)
-      const parsed = JSON.parse(editContent);
-      parsed.version = forkResult.entry.ref.split('@').pop();
-      // Save the modified entity
-      const result = await api.importEntity(JSON.stringify(parsed));
+      updated.version = forkResult.entry.ref.split('@').pop();
+      const result = await api.importEntity(JSON.stringify(updated));
       if (result.ok) {
         setEditResult(`✅ Saved as new version: ${result.entry.ref}`);
         setTimeout(() => { setEditing(false); onBack(); }, 2000);
@@ -173,20 +162,7 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
   };
 
   if (editing) {
-    return (
-      <div className="card">
-        <h2>Edit {entity.entity}: {entity.name}</h2>
-        <p className="hint">Edit the JSON then save. Entities are immutable — a new version will be created.</p>
-        {editResult && <div className={editResult.startsWith('✅') ? 'success-banner' : 'error-banner'} style={{ whiteSpace: 'pre-wrap' }}>{editResult}</div>}
-        <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
-          style={{ width: '100%', minHeight: 400, fontFamily: 'monospace', fontSize: 12, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, lineHeight: 1.5 }}
-        />
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <button className="btn btn-primary" onClick={saveEdit}>Save as new version</button>
-          <button className="btn" onClick={() => { setEditing(false); setEditResult(null); }}>Cancel</button>
-        </div>
-      </div>
-    );
+    return <EntityEditor entity={entity} onSave={saveEdit} onCancel={() => { setEditing(false); setEditResult(null); }} />;
   }
 
   return (

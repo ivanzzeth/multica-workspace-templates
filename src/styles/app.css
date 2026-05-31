@@ -498,3 +498,28 @@ body {
   color: var(--text) !important;
   border: 1px solid var(--border);
 }
+
+/* Form inputs */
+.form-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.form-input:focus { outline: none; border-color: var(--accent); }
+.form-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.form-select:focus { outline: none; border-color: var(--accent); }
