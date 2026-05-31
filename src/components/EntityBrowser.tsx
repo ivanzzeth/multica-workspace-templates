@@ -23,7 +23,7 @@ export function EntityBrowser({ api }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<any>(null);
+  const [detail, setDetail] = useState<{ entity: any; type: string; name: string; version: string } | null>(null);
   const [search, setSearch] = useState('');
 
   const apiRef = useRef(api);
@@ -39,9 +39,7 @@ export function EntityBrowser({ api }: Props) {
       const ents = await apiRef.current.fetchEntities(filter);
       setEntities(ents);
       setLoaded(true);
-    } catch (e: any) {
-      setError(e.message);
-    }
+    } catch (e: any) { setError(e.message); }
     setLoading(false);
   }, []);
 
@@ -56,32 +54,47 @@ export function EntityBrowser({ api }: Props) {
     loadEntities(tab === 'all' ? undefined : tab, q);
   }, [tab, loadEntities]);
 
-  const openDetail = useCallback(async (ref: string) => {
+  const openDetail = useCallback(async (type: string, name: string, version?: string) => {
     setLoading(true);
+    setError(null);
     try {
-      const parts = ref.split('/');
-      const type = parts[parts.length - 1].split('@')[0] === 'skill' || parts.includes('skill') ? 'skill'
-        : parts.includes('agent') ? 'agent' : 'autopilot';
-      const namePart = ref.split('/').pop() || '';
-      const name = namePart.split('@')[0];
-      const version = namePart.includes('@') ? namePart.split('@')[1] : undefined;
       const data = await apiRef.current.fetchEntity(type, name, version);
-      setDetail(data);
-    } catch (e: any) {
-      setError(e.message);
-    }
+      setDetail({ entity: data.entity, type, name, version: data.entity.version || version || '' });
+    } catch (e: any) { setError(e.message); }
     setLoading(false);
   }, []);
 
   useEffect(() => { loadEntities(); }, []);
 
   if (detail) {
-    return <EntityDetail entity={detail.entity} refStr={detail.ref} onBack={() => { setDetail(null); setError(null); }} api={api} />;
+    return <EntityDetail
+      api={api}
+      entity={detail.entity}
+      type={detail.type}
+      name={detail.name}
+      currentVersion={detail.version}
+      allVersions={entities.filter((e) => e.type === detail.type && e.name === detail.name)}
+      onBack={() => { setDetail(null); setError(null); }}
+      onSwitchVersion={(v) => openDetail(detail.type, detail.name, v)}
+    />;
   }
 
-  const filtered = search
-    ? entities.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()) || e.description?.toLowerCase().includes(search.toLowerCase()))
-    : entities;
+  // Group entities by (type, name) — one card per entity
+  const grouped = new Map<string, { latest: EntitySummary; versionCount: number }>();
+  for (const e of entities) {
+    const key = `${e.type}/${e.name}`;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.versionCount++;
+      if (semverGt(e.version, existing.latest.version)) existing.latest = e;
+    } else {
+      grouped.set(key, { latest: e, versionCount: 1 });
+    }
+  }
+  const displayList = Array.from(grouped.values()).sort((a, b) => a.latest.name.localeCompare(b.latest.name));
+  const filteredList = search
+    ? displayList.filter((g) => g.latest.name.toLowerCase().includes(search.toLowerCase()))
+    : displayList;
 
   return (
     <div className="wizard">
@@ -93,32 +106,34 @@ export function EntityBrowser({ api }: Props) {
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {TAB_OPTIONS.map((t) => (
             <button key={t.key} className={`nav-btn ${tab === t.key ? 'active' : ''}`} onClick={() => switchTab(t.key)}>
-              {t.label} {tab === t.key && entities.length > 0 && `(${entities.length})`}
+              {t.label} {displayList.length > 0 && `(${displayList.length})`}
             </button>
           ))}
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <input
-            className="input"
-            placeholder="Search entities..."
-            value={search}
-            onChange={(e) => doSearch(e.target.value)}
-            style={{ width: '100%' }}
-          />
+          <input className="input" placeholder="Search entities..." value={search}
+            onChange={(e) => doSearch(e.target.value)} style={{ width: '100%' }} />
         </div>
 
         {loading && <div className="spinner" />}
 
-        {!loading && filtered.length === 0 && (
+        {!loading && filteredList.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: 32 }}>
-            <p className="hint">No entities found. Import entity YAML files or export a workspace in reference mode to populate entities.</p>
+            <p className="hint">No entities found.</p>
           </div>
         )}
 
-        {filtered.map((e) => (
-          <button key={e.ref} className="template-card" onClick={() => openDetail(e.ref)} style={{ width: '100%', textAlign: 'left' }}>
-            <strong>{TYPE_ICONS[e.type] || '\u{1F4E6}'} {e.name} <span className="version-badge">v{e.version}</span> <span className="source-badge">{e.source === 'local' ? 'local' : 'remote'}</span></strong>
+        {filteredList.map(({ latest: e, versionCount: n }) => (
+          <button key={`${e.type}/${e.name}`} className="template-card"
+            onClick={() => openDetail(e.type, e.name, e.version)}
+            style={{ width: '100%', textAlign: 'left' }}>
+            <strong>
+              {TYPE_ICONS[e.type] || '\u{1F4E6}'} {e.name}
+              <span className="version-badge" style={{ marginLeft: 6 }}>v{e.version}</span>
+              {n > 1 && <span className="version-badge" style={{ background: 'var(--accent)', color: '#fff', marginLeft: 4 }}>{n} versions</span>}
+              <span className="source-badge" style={{ marginLeft: 4 }}>{e.source === 'local' ? 'local' : 'remote'}</span>
+            </strong>
             <span className="desc">{e.description || e.ref}</span>
             <span className="badges">
               <span className="tag">{e.type}</span>
@@ -132,20 +147,27 @@ export function EntityBrowser({ api }: Props) {
   );
 }
 
-function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: string; onBack: () => void; api: ReturnType<typeof useApi> }) {
+function EntityDetail({ api, entity, type, name, currentVersion, allVersions, onBack, onSwitchVersion }: {
+  api: ReturnType<typeof useApi>;
+  entity: any;
+  type: string;
+  name: string;
+  currentVersion: string;
+  allVersions: EntitySummary[];
+  onBack: () => void;
+  onSwitchVersion: (v: string) => void;
+}) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editResult, setEditResult] = useState<string | null>(null);
+  const [loadingVersion, setLoadingVersion] = useState(false);
 
   const doDelete = async () => {
     try { await api.deleteEntity(entity.entity, entity.name, entity.version, entity.namespace || 'multica'); onBack(); }
     catch (e: any) { alert(e.message); }
   };
 
-  const startEdit = () => {
-    setEditing(true);
-    setEditResult(null);
-  };
+  const startEdit = () => { setEditing(true); setEditResult(null); };
 
   const saveEdit = async (updated: any) => {
     setEditResult(null);
@@ -165,15 +187,40 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
     return <EntityEditor entity={entity} onSave={saveEdit} onCancel={() => { setEditing(false); setEditResult(null); }} />;
   }
 
+  // Collect versions sorted for the switcher
+  const sortedVersions = [...allVersions].sort((a, b) => semverGt(a.version, b.version) ? -1 : 1);
+  const versionNames = sortedVersions.map((v) => v.version);
+  if (!versionNames.includes(currentVersion) && !sortedVersions.find((v) => v.version === currentVersion)) {
+    versionNames.push(currentVersion);
+  }
+
   return (
     <div className="card">
       <button className="nav-btn" onClick={onBack} style={{ marginBottom: 16 }}>{'◀'} Back to Entity Browser</button>
 
-      <h2>{TYPE_ICONS[entity.entity] || ''} {entity.name} <span className="version-badge">v{entity.version}</span></h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+        <h2 style={{ margin: 0 }}>{TYPE_ICONS[type] || ''} {name}</h2>
+      </div>
+
+      {/* Version switcher */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>Version:</span>
+        <select value={currentVersion} onChange={(e) => onSwitchVersion(e.target.value)}
+          disabled={loadingVersion}
+          style={{ padding: '4px 8px', background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>
+          {versionNames.map((v) => (
+            <option key={v} value={v}>
+              v{v} {v === sortedVersions[0]?.version ? '(latest)' : ''}
+            </option>
+          ))}
+        </select>
+        {loadingVersion && <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />}
+      </div>
+
       <p className="hint" style={{ marginBottom: 16 }}>{entity.description}</p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-        {entity.entity === 'agent' && (
+        {type === 'agent' && (
           <>
             <div><strong>Model:</strong> {entity.model}</div>
             <div><strong>Runtime:</strong> {entity.runtime_provider}</div>
@@ -181,7 +228,7 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
             {entity.max_concurrent_tasks && <div><strong>Max Tasks:</strong> {entity.max_concurrent_tasks}</div>}
           </>
         )}
-        {entity.entity === 'autopilot' && (
+        {type === 'autopilot' && (
           <>
             <div><strong>Mode:</strong> {entity.mode}</div>
             <div><strong>Agent:</strong> {entity.agent_ref}</div>
@@ -191,18 +238,18 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
         {entity.metadata?.tags && <div><strong>Tags:</strong> {entity.metadata.tags.join(', ')}</div>}
       </div>
 
-      {entity.entity === 'agent' && entity.skills && Object.keys(entity.skills).length > 0 && (
+      {type === 'agent' && entity.skills && Object.keys(entity.skills).length > 0 && (
         <div style={{ marginBottom: 20 }}>
           <h3>Skills ({Object.keys(entity.skills).length})</h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {Object.entries(entity.skills).map(([name, version]: [string, any]) => (
-              <span key={name} className="tag" style={{ fontSize: 13 }}>{name}@{version}</span>
+            {Object.entries(entity.skills).map(([sn, sv]: [string, any]) => (
+              <span key={sn} className="tag" style={{ fontSize: 13 }}>{sn}@{sv}</span>
             ))}
           </div>
         </div>
       )}
 
-      {(entity.entity === 'skill' || entity.entity === 'agent') && (
+      {(type === 'skill' || type === 'agent') && (
         <div style={{ marginBottom: 20 }}>
           <h3>Files</h3>
           {entity.files ? entity.files.map((f: any) => (
@@ -217,7 +264,7 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
         </div>
       )}
 
-      {entity.entity === 'agent' && entity.instructions && (
+      {type === 'agent' && entity.instructions && (
         <div style={{ marginBottom: 20 }}>
           <h3>Instructions</h3>
           <pre style={{ maxHeight: 400, overflow: 'auto', fontSize: 12, padding: 12, borderRadius: 4, whiteSpace: 'pre-wrap' }}>
@@ -231,14 +278,25 @@ function EntityDetail({ entity, refStr, onBack, api }: { entity: any; refStr: st
         <button className="btn btn-small" onClick={startEdit}>Edit</button>
         {deleteConfirm ? (
           <>
-            <span style={{ color: '#ef4444', fontSize: 14 }}>Confirm delete?</span>
+            <span style={{ color: '#ef4444', fontSize: 14 }}>Delete this version?</span>
             <button className="nav-btn" onClick={doDelete} style={{ background: '#ef4444', color: '#fff' }}>Yes, delete</button>
             <button className="nav-btn" onClick={() => setDeleteConfirm(false)}>Cancel</button>
           </>
         ) : (
-          <button className="nav-btn" onClick={() => setDeleteConfirm(true)} style={{ color: '#ef4444' }}>Delete Entity</button>
+          <button className="nav-btn" onClick={() => setDeleteConfirm(true)} style={{ color: '#ef4444' }}>Delete</button>
         )}
       </div>
     </div>
   );
+}
+
+/** Simple semver comparison (a > b returns true). */
+function semverGt(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) > (pb[i] || 0)) return true;
+    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+  }
+  return false;
 }
