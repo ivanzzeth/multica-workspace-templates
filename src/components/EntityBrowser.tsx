@@ -103,6 +103,8 @@ export function EntityBrowser({ api }: Props) {
         <p className="hint">Browse and manage reusable entities (agents, skills, autopilots).</p>
         {error && <div className="error-banner">{error}</div>}
 
+        <EntityImporter api={api} onImported={() => loadEntities(tab === 'all' ? undefined : tab, search)} />
+
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {TAB_OPTIONS.map((t) => (
             <button key={t.key} className={`nav-btn ${tab === t.key ? 'active' : ''}`} onClick={() => switchTab(t.key)}>
@@ -163,7 +165,7 @@ function EntityDetail({ api, entity, type, name, currentVersion, allVersions, on
   const [loadingVersion, setLoadingVersion] = useState(false);
 
   const doDelete = async () => {
-    try { await api.deleteEntity(entity.entity, entity.name, entity.version, entity.namespace || 'multica'); onBack(); }
+    try { await api.deleteEntity(type, entity.name, entity.version, entity.namespace || 'multica'); onBack(); }
     catch (e: any) { alert(e.message); }
   };
 
@@ -299,4 +301,54 @@ function semverGt(a: string, b: string): boolean {
     if ((pa[i] || 0) < (pb[i] || 0)) return false;
   }
   return false;
+}
+
+// ── Entity Importer (validate + import inline) ──
+
+function EntityImporter({ api, onImported }: { api: ReturnType<typeof useApi>; onImported: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [yaml, setYaml] = useState('');
+  const [result, setResult] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  const doValidate = async () => {
+    if (!yaml.trim()) return;
+    setResult(null);
+    try {
+      const v = await api.validateEntity(yaml);
+      if (v.valid) { setResult(`✅ Valid ${v.entity_type} entity — ready to import.`); }
+      else { setResult('❌ Validation failed:\n' + v.issues.map((i) => `  ${i.severity === 'error' ? '🔴' : '🟡'} [${i.field}] ${i.message}`).join('\n')); }
+    } catch (e: any) { setResult(`❌ ${e.message}`); }
+  };
+
+  const doImport = async () => {
+    if (!yaml.trim()) return;
+    setImporting(true); setResult(null);
+    try {
+      const r = await api.importEntity(yaml);
+      if (r.ok) { setResult(`✅ Imported: ${r.entry.ref}`); setYaml(''); setTimeout(() => { setOpen(false); onImported(); }, 1500); }
+    } catch (e: any) { setResult(`❌ ${e.message}`); }
+    setImporting(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button className="btn btn-small" onClick={() => setOpen(!open)} style={{ marginBottom: open ? 8 : 0 }}>
+        {open ? '− Close' : '+ Import Entity'}
+      </button>
+      {open && (
+        <div className="card" style={{ padding: 16 }}>
+          <p className="hint" style={{ marginBottom: 8 }}>Paste entity YAML. Validate first, then import.</p>
+          <textarea value={yaml} onChange={(e) => setYaml(e.target.value)}
+            placeholder="entity: skill&#10;schema_version: '1.0'&#10;name: my-skill&#10;version: 1.0.0"
+            style={{ width: '100%', minHeight: 150, fontFamily: 'monospace', fontSize: 12, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: 10, resize: 'vertical' }} />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button className="btn btn-small" onClick={doValidate}>Validate</button>
+            <button className="btn btn-small" onClick={doImport} disabled={importing || !yaml.trim()}>{importing ? 'Importing...' : 'Import'}</button>
+          </div>
+          {result && <pre style={{ marginTop: 8, fontSize: 12, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{result}</pre>}
+        </div>
+      )}
+    </div>
+  );
 }

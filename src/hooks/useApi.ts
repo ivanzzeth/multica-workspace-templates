@@ -329,6 +329,13 @@ export function useApi() {
     return data.server as ServerProfile;
   }, []);
 
+  const setDefaultServer = useCallback(async (id: string) => {
+    const res = await fetch(`/api/servers/${encodeURIComponent(id)}/default`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    return data.server as ServerProfile;
+  }, []);
+
   // ── Secrets ──
 
   const fetchSecrets = useCallback(async (serverId?: string) => {
@@ -464,6 +471,7 @@ export function useApi() {
     addServer,
     removeServer,
     switchServer,
+    setDefaultServer,
     fetchSecrets,
     setSecret,
     deleteSecret,

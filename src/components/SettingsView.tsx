@@ -112,9 +112,12 @@ export function SettingsView({ api, onServersChanged }: Props) {
               </div>
               <code style={{ fontSize: 11, color: 'var(--text2)' }}>{s.server_url}</code>
               <div style={{ display: 'flex', gap: 6 }}>
-                {current?.id !== s.id && (
-                  <button className="btn-small" onClick={() => doSwitch(s.id)} disabled={switching === s.id}>
-                    {switching === s.id ? 'Switching...' : 'Switch'}
+                <button className="btn-small" onClick={() => doSwitch(s.id)} disabled={switching === s.id}>
+                  {switching === s.id ? 'Switching...' : current?.id === s.id ? 'Active' : 'Switch'}
+                </button>
+                {!s.is_default && (
+                  <button className="btn-small" onClick={async () => { await api.setDefaultServer(s.id); setMsg('Set as default'); refresh(); }}>
+                    Set default
                   </button>
                 )}
                 <button className="btn-small" onClick={() => doRemove(s.id)} style={{ borderColor: 'var(--red)', color: 'var(--red)' }}>Remove</button>
