@@ -14,29 +14,18 @@ export function TemplatesView({ api }: Props) {
   const apiRef = useRef(api);
   apiRef.current = api;
 
-  const openDetail = useCallback(
-    async (name: string) => {
-      setLoading(true);
-      setError(null);
-      try {
-        const t = await apiRef.current.fetchTemplate(name);
-        setDetail(t);
-      } catch (e: any) {
-        setError(e.message);
-      }
-      setLoading(false);
-    },
-    [],
-  );
+  const openDetail = useCallback(async (name: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const t = await apiRef.current.fetchTemplate(name);
+      setDetail(t);
+    } catch (e: any) { setError(e.message); }
+    setLoading(false);
+  }, []);
 
   if (detail) {
-    return (
-      <TemplateDetailView
-        template={detail}
-        api={api}
-        onBack={() => { setDetail(null); setError(null); }}
-      />
-    );
+    return <TemplateDetailView template={detail} api={api} onBack={() => { setDetail(null); setError(null); }} />;
   }
 
   if (error) return <div className="error-banner">{error}</div>;
@@ -103,7 +92,6 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
     const apNames = template.autopilots.map((a) => a.title);
     if (agentNames.length === 0 && skillNames.length === 0 && apNames.length === 0) return;
 
-    // Mark all as loading
     const loading: Record<string, 'loading'> = {};
     agentNames.forEach((n) => { loading[`agent-${n}`] = 'loading'; });
     skillNames.forEach((n) => { loading[`skill-${n}`] = 'loading'; });
@@ -138,6 +126,9 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
       </button>
     );
   };
+
+  const entityRefs = template.includes?.entities || [];
+
   return (
     <div>
       <button className="btn btn-back" onClick={onBack}>← Back to list</button>
@@ -155,29 +146,17 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
         <div className="result-summary" style={{ marginTop: 12 }}>
           <div className="result-stat ok"><span className="stat-num">{template.agents.length}</span><span className="stat-label">Agents</span></div>
           <div className="result-stat ok"><span className="stat-num">{template.skills?.length || 0}</span><span className="stat-label">Skills</span></div>
+          <div className="result-stat ok"><span className="stat-num">{entityRefs.length}</span><span className="stat-label">Entity Refs</span></div>
           <div className="result-stat ok"><span className="stat-num">{template.projects.length}</span><span className="stat-label">Projects</span></div>
           <div className="result-stat ok"><span className="stat-num">{template.labels.length}</span><span className="stat-label">Labels</span></div>
           <div className="result-stat ok"><span className="stat-num">{template.autopilots.length}</span><span className="stat-label">Autopilots</span></div>
         </div>
       </div>
 
-      {/* Skills */}
-      {template.skills && template.skills.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2>Skills</h2>
-          <p className="hint">{template.skills.length} skill{template.skills.length > 1 ? 's' : ''} defined in this template.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {template.skills.map((s) => (
-              <SkillCard key={s.name} skill={s} extractBtn={extractBtn('skill', s.name)} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Agents */}
+      {/* Entity References section (tables of all entities with source column) */}
       <div className="card" style={{ marginTop: 16 }}>
         <h2>Agents</h2>
-        <p className="hint">{template.agents.length} agent{template.agents.length > 1 ? 's' : ''}</p>
+        <p className="hint">{template.agents.length} entities</p>
         <table className="table">
           <thead>
             <tr>
@@ -186,16 +165,90 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
               <th>Runtime</th>
               <th>Skills</th>
               <th>Env</th>
+              <th>Source</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {template.agents.map((a) => (
-              <AgentRow key={a.name} agent={a} extractBtn={extractBtn('agent', a.name)} />
+              <AgentRow key={a.name} agent={a} extractBtn={extractBtn('agent', a.name)} source={'inline'} />
             ))}
           </tbody>
         </table>
+        {entityRefs.filter((e: any) => e.ref.startsWith('agent/')).length > 0 && (
+          <>
+            <p className="hint" style={{ marginTop: 12 }}>Entity references (resolved at import):</p>
+            {entityRefs.filter((e: any) => e.ref.startsWith('agent/')).map((e: any, idx: number) => (
+              <div key={`ref-agent-${idx}`} className="dry-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 4, fontSize: 12 }}>
+                <span className="version-badge" style={{ background: '#3b82f6', color: '#fff', fontSize: 10 }}>REF</span>
+                <code>{e.ref}</code>
+                {e.overrides && <span className="version-badge" style={{ fontSize: 10 }}>overrides</span>}
+              </div>
+            ))}
+          </>
+        )}
       </div>
+
+      {/* Skills */}
+      {(template.skills?.length || 0) > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Skills</h2>
+          <p className="hint">{template.skills!.length} inline skills</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {template.skills!.map((s) => (
+              <SkillCard key={s.name} skill={s} extractBtn={extractBtn('skill', s.name)} source="inline" />
+            ))}
+          </div>
+        </div>
+      )}
+      {entityRefs.filter((e: any) => e.ref.startsWith('skill/')).length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Skills (from entity refs)</h2>
+          <p className="hint">Resolved at import.</p>
+          {entityRefs.filter((e: any) => e.ref.startsWith('skill/')).map((e: any, idx: number) => (
+            <div key={`ref-skill-${idx}`} className="dry-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 4, fontSize: 12 }}>
+              <span className="version-badge" style={{ background: '#3b82f6', color: '#fff', fontSize: 10 }}>REF</span>
+              <code>{e.ref}</code>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Autopilots */}
+      {template.autopilots.length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Autopilots</h2>
+          {template.autopilots.map((ap) => (
+            <div key={ap.title} className="dry-item" style={{ display: 'block', padding: '10px 12px', marginBottom: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 13 }}>{ap.title} <span className="version-badge" style={{ fontSize: 10 }}>inline</span></strong>
+                {extractBtn('autopilot', ap.title)}
+              </div>
+              <span className="reason" style={{ fontSize: 11 }}>→ {ap.agent_ref} · {ap.mode}</span>
+              {ap.triggers && ap.triggers.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {ap.triggers.map((t, i) => (
+                    <span key={i} className="dry-item" style={{ fontSize: 10, padding: '2px 6px', background: 'transparent', border: 'none' }}>
+                      ⏱ {t.cron} ({t.timezone}){t.label ? ` — ${t.label}` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {entityRefs.filter((e: any) => e.ref.startsWith('autopilot/')).length > 0 && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h2>Autopilots (from entity refs)</h2>
+          {entityRefs.filter((e: any) => e.ref.startsWith('autopilot/')).map((e: any, idx: number) => (
+            <div key={`ref-ap-${idx}`} className="dry-item" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 4, fontSize: 12 }}>
+              <span className="version-badge" style={{ background: '#3b82f6', color: '#fff', fontSize: 10 }}>REF</span>
+              <code>{e.ref}</code>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Projects */}
       {template.projects.length > 0 && (
@@ -238,39 +291,12 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
         </div>
       )}
 
-      {/* Autopilots */}
-      {template.autopilots.length > 0 && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <h2>Autopilots</h2>
-          {template.autopilots.map((ap) => (
-            <div key={ap.title} className="dry-item" style={{ display: 'block', padding: '10px 12px', marginBottom: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontSize: 13 }}>{ap.title}</strong>
-                {extractBtn('autopilot', ap.title)}
-              </div>
-              <span className="reason" style={{ fontSize: 11 }}>
-                → {ap.agent_ref} · {ap.mode}
-              </span>
-              {ap.triggers && ap.triggers.length > 0 && (
-                <div style={{ marginTop: 6 }}>
-                  {ap.triggers.map((t, i) => (
-                    <span key={i} className="dry-item" style={{ fontSize: 10, padding: '2px 6px', background: 'transparent', border: 'none' }}>
-                      ⏱ {t.cron} ({t.timezone}){t.label ? ` — ${t.label}` : ''}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
       <button className="btn btn-back" onClick={onBack}>← Back to list</button>
     </div>
   );
 }
 
-function SkillCard({ skill, extractBtn }: { skill: NonNullable<TemplateDetail['skills']>[number]; extractBtn: React.ReactNode }) {
+function SkillCard({ skill, extractBtn, source }: { skill: NonNullable<TemplateDetail['skills']>[number]; extractBtn: React.ReactNode; source?: string }) {
   const [showFiles, setShowFiles] = useState(false);
   const hasFiles = skill.files && skill.files.length > 0;
   const hasConfig = skill.config && Object.keys(skill.config).length > 0;
@@ -280,9 +306,8 @@ function SkillCard({ skill, extractBtn }: { skill: NonNullable<TemplateDetail['s
       <div className="skill-card-header">
         <div>
           <strong>{skill.name}</strong>
-          <span className="reason" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>
-            {skill.description}
-          </span>
+          {source === 'inline' && <span className="version-badge" style={{ marginLeft: 6 }}>inline</span>}
+          <span className="reason" style={{ display: 'block', fontSize: 12, marginTop: 2 }}>{skill.description}</span>
         </div>
         <div>{extractBtn}</div>
       </div>
@@ -312,7 +337,7 @@ function SkillCard({ skill, extractBtn }: { skill: NonNullable<TemplateDetail['s
   );
 }
 
-function AgentRow({ agent, extractBtn }: { agent: TemplateDetail['agents'][number]; extractBtn: React.ReactNode }) {
+function AgentRow({ agent, extractBtn, source }: { agent: TemplateDetail['agents'][number]; extractBtn: React.ReactNode; source?: string }) {
   const [expanded, setExpanded] = useState(false);
   const envKeys = agent.custom_env_template ? Object.keys(agent.custom_env_template) : [];
 
@@ -324,11 +349,14 @@ function AgentRow({ agent, extractBtn }: { agent: TemplateDetail['agents'][numbe
         <td><span className="badge-provider">{agent.runtime_provider}</span></td>
         <td>{agent.skills?.length ? <span className="badge">{agent.skills.length}</span> : '—'}</td>
         <td>{envKeys.length > 0 ? <span className="badge">{envKeys.length}</span> : '—'}</td>
+        <td>{source === 'inline'
+          ? <span className="version-badge" style={{ fontSize: 10 }}>inline</span>
+          : <span className="version-badge" style={{ background: '#3b82f6', color: '#fff', fontSize: 10 }}>REF</span>}</td>
         <td onClick={(e) => e.stopPropagation()}>{extractBtn}</td>
       </tr>
       {expanded && (
         <tr className="agent-detail-row">
-          <td colSpan={5}>
+          <td colSpan={7}>
             <div className="agent-detail">
               {agent.skills && agent.skills.length > 0 && (
                 <div className="detail-section">

@@ -31,6 +31,9 @@ export interface TemplateDetail {
   labels: TemplateLabel[];
   autopilots: TemplateAutopilot[];
   skills?: TemplateSkill[];
+  includes?: {
+    entities?: Array<{ ref: string; hash?: string; overrides?: Record<string, any> }>;
+  };
 }
 
 export interface TemplateSkill {
