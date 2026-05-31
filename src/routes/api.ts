@@ -366,6 +366,18 @@ export async function createApiRouter() {
     }
   });
 
+  // Fork an entity (bump version + save as copy)
+  router.post('/entities/fork', (req, res) => {
+    try {
+      const { ref, bump } = req.body;
+      if (!ref) { res.status(400).json({ error: 'Missing ref' }); return; }
+      const entry = registry.fork(ref, bump || 'patch');
+      res.json({ ok: true, entry });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Export ──
 
   router.post('/export/preview', async (req, res) => {

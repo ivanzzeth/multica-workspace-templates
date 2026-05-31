@@ -416,6 +416,17 @@ export function useApi() {
     return data as { ok: boolean; entry: any };
   }, []);
 
+  const forkEntity = useCallback(async (ref: string, bump?: string) => {
+    const res = await fetch(`/api/entities/fork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ref, bump: bump || 'patch' }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || JSON.stringify(data));
+    return data as { ok: boolean; entry: any };
+  }, []);
+
   const extractEntities = useCallback(async (templateName: string, agents?: string[], skills?: string[], autopilots?: string[]) => {
     const res = await fetch(`/api/templates/${encodeURIComponent(templateName)}/extract`, {
       method: 'POST',
@@ -459,6 +470,7 @@ export function useApi() {
     fetchEntity,
     validateEntity,
     importEntity,
+    forkEntity,
     extractEntities,
     deleteEntity,
   };
