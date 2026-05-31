@@ -256,6 +256,28 @@ export async function createApiRouter() {
     }
   });
 
+  // Convert an inline template to entity references (v2 format)
+  router.post('/templates/convert', (req, res) => {
+    try {
+      const { name, content } = req.body;
+      if (!name || !content) { res.status(400).json({ error: 'Missing name or content' }); return; }
+      // Save to user templates directory
+      const { stringify } = require('yaml');
+      const { writeFileSync, mkdirSync, existsSync } = require('fs');
+      const { join } = require('path');
+      const { homedir } = require('os');
+      const userDir = join(homedir(), '.multica-templates');
+      if (!existsSync(userDir)) mkdirSync(userDir, { recursive: true });
+      const filename = `${name.toLowerCase().replace(/\s+/g, '-')}.yaml`;
+      const yaml = stringify(content, { indent: 2, lineWidth: 120 });
+      const filePath = join(userDir, filename);
+      writeFileSync(filePath, yaml, 'utf-8');
+      res.json({ ok: true, saved_to: filePath });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Import ──
 
   router.post('/import/dry-run', async (req, res) => {

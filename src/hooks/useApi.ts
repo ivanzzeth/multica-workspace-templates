@@ -271,7 +271,7 @@ export function useApi() {
     [],
   );
 
-  const exportPreview = useCallback(async (workspaceId: string, options?: ExportOptions) => {
+  const exportPreview = useCallback(async (workspaceId: string, options?: any) => {
     const res = await fetch('/api/export/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -281,14 +281,14 @@ export function useApi() {
     return data.template as TemplateDetail;
   }, []);
 
-  const exportApply = useCallback(async (workspaceId: string, name: string, options?: ExportOptions) => {
+  const exportApply = useCallback(async (workspaceId: string, name: string, options?: any) => {
     const res = await fetch('/api/export/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ workspace_id: workspaceId, name, options }),
     });
     const data = await res.json();
-    return data as { saved_to: string; version: string };
+    return data as { saved_to: string; version: string; entities_saved?: number; mode?: string };
   }, []);
 
   // ── Servers ──

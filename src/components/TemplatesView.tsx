@@ -127,6 +127,55 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
     );
   };
 
+  // Inline → ref conversion
+  const [convertMsg, setConvertMsg] = useState<string | null>(null);
+  const [converting, setConverting] = useState(false);
+
+  const convertToRefs = useCallback(async () => {
+    if (!template.agents.length && !(template.skills?.length ?? 0)) return;
+    setConverting(true);
+    setConvertMsg(null);
+    try {
+      // 1. Extract all inline agents, skills, autopilots as entities
+      const agentNames = template.agents.map((a) => a.name);
+      const skillNames = (template.skills || []).map((s) => s.name);
+      const apNames = template.autopilots.map((a) => a.title);
+      await api.extractEntities(template.name, agentNames, skillNames, apNames);
+
+      // 2. Build entity refs for what was extracted
+      const refs: Array<{ ref: string }> = [];
+      for (const n of agentNames) refs.push({ ref: `agent/${n}@1.0.0` });
+      for (const n of skillNames) refs.push({ ref: `skill/${n}@1.0.0` });
+      for (const n of apNames) refs.push({ ref: `autopilot/${n}@1.0.0` });
+
+      // 3. Build a v2 template with includes + empty inline
+      const newTemplate = {
+        schema_version: '2.0',
+        name: template.name,
+        description: template.description,
+        agents: [],
+        skills: [],
+        autopilots: [],
+        projects: template.projects,
+        labels: template.labels,
+        runtime_mapping: { claude: { display_name: 'Claude' }, cursor: { display_name: 'Cursor' }, codex: { display_name: 'Codex' } },
+        includes: { entities: refs },
+      };
+
+      // Save the updated template via API
+      const res = await fetch('/api/templates/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: template.name, content: newTemplate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setConvertMsg(`✅ Converted to entity refs. ${refs.length} entities extracted. Template saved.`);
+      setTimeout(() => onBack(), 2500);
+    } catch (e: any) { setConvertMsg(`❌ ${e.message}`); }
+    setConverting(false);
+  }, [template, api, onBack]);
+
   const entityRefs = template.includes?.entities || [];
 
   return (
@@ -138,10 +187,15 @@ function TemplateDetailView({ template, api, onBack }: { template: TemplateDetai
         <h2>{template.name} <span className="version-badge">v{template.version}</span></h2>
         <p className="hint">{template.description}</p>
         {extractMsg && <div className="success-banner" style={{ margin: '8px 0', fontSize: 13 }}>{extractMsg}</div>}
+        {convertMsg && <div className={convertMsg.startsWith('✅') ? 'success-banner' : 'error-banner'} style={{ margin: '8px 0', fontSize: 13 }}>{convertMsg}</div>}
         {(template.agents.length > 0 || (template.skills?.length ?? 0) > 0 || template.autopilots.length > 0) && (
-          <button className="btn btn-small" onClick={extractAll} style={{ marginTop: 8, fontSize: 12 }}>
-            🔄 Extract all as entities
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <button className="btn btn-small" onClick={extractAll} style={{ fontSize: 12 }}>🔄 Extract all as entities</button>
+            <button className="btn btn-small" onClick={convertToRefs} disabled={converting}
+              style={{ fontSize: 12, background: '#3b82f6', color: '#fff', borderColor: '#3b82f6' }}>
+              {converting ? 'Converting...' : '⇄ Convert to entity references'}
+            </button>
+          </div>
         )}
         <div className="result-summary" style={{ marginTop: 12 }}>
           <div className="result-stat ok"><span className="stat-num">{template.agents.length}</span><span className="stat-label">Agents</span></div>
